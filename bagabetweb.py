@@ -11,29 +11,15 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def money(v):
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# --- FUNÇÃO DE SALVAMENTO ---
-def salvar_na_nuvem(dados):
-    df_save = pd.DataFrame(dados)
-    # Garante que as colunas existam na ordem certa
-    cols = ['a', 'b', 'ga', 'gb', 'finalizado', 'apostas_abertas', 'apostas']
-    for c in cols:
-        if c not in df_save.columns: df_save[c] = None
-    
-    # Converte apostas (lista) para texto para o Sheets aceitar
-    df_save['apostas'] = df_save['apostas'].apply(lambda x: "|".join([f"{a['nome']}:{a['valor']}:{a['opcao']}" for a in x]) if isinstance(x, list) else "")
-    conn.update(data=df_save[cols])
-    st.cache_data.clear()
-
-# --- FUNÇÃO DE CARREGAMENTO ---
+# --- FUNÇÃO DE BUSCA (REFORÇADA) ---
 def buscar_dados():
     try:
         df = conn.read(ttl=0)
         if df is not None and not df.empty:
-            # Filtra apenas o que interessa e remove linhas vazias
             df = df.dropna(subset=['a', 'b'])
             lista = df.to_dict('records')
             for j in lista:
-                # Recuperar Apostas
+                # 1. Recuperar Apostas
                 j['apostas'] = []
                 txt = str(j.get('apostas', ""))
                 if txt and txt not in ["nan", "None", ""]:
@@ -42,17 +28,38 @@ def buscar_dados():
                         if len(p) == 3:
                             j['apostas'].append({"nome": p[0], "valor": float(p[1]), "opcao": p[2]})
                 
-                # Tratar Gols (limpeza de texto)
-                j['ga'] = int(float(j['ga'])) if str(j.get('ga')) not in ["nan", "None", ""] else None
-                j['gb'] = int(float(j['gb'])) if str(j.get('gb')) not in ["nan", "None", ""] else None
-                j['finalizado'] = str(j.get('finalizado')) == "True"
-                j['apostas_abertas'] = str(j.get('apostas_abertas', "True")) == "True"
+                # 2. Tratar Gols (Limpeza total)
+                for col in ['ga', 'gb']:
+                    val = str(j.get(col, ""))
+                    if val.replace('.','',1).strip().isdigit():
+                        j[col] = int(float(val))
+                    else:
+                        j[col] = None
+
+                # 3. O SEGREDO: Tratar 'finalizado' de qualquer jeito (Texto ou Boleano)
+                status = str(j.get('finalizado', "")).upper()
+                j['finalizado'] = status in ["TRUE", "1", "VERDADEIRO", "T"]
+                
+                status_ap = str(j.get('apostas_abertas', "")).upper()
+                j['apostas_abertas'] = status_ap in ["TRUE", "1", "VERDADEIRO", "T"]
+                
             return lista
     except:
         return []
     return []
 
-# --- LÓGICA DE INICIALIZAÇÃO ---
+def salvar_na_nuvem(dados):
+    df_save = pd.DataFrame(dados)
+    # Garante que as colunas existam na ordem certa
+    cols = ['a', 'b', 'ga', 'gb', 'finalizado', 'apostas_abertas', 'apostas']
+    for c in cols:
+        if c not in df_save.columns: df_save[c] = None
+    
+    df_save['apostas'] = df_save['apostas'].apply(lambda x: "|".join([f"{a['nome']}:{a['valor']}:{a['opcao']}" for a in x]) if isinstance(x, list) else "")
+    conn.update(data=df_save[cols])
+    st.cache_data.clear()
+
+# --- INICIALIZAÇÃO ---
 if 'jogos' not in st.session_state:
     st.session_state.jogos = buscar_dados()
 
@@ -61,13 +68,13 @@ st.sidebar.title("BAGA BET ⚽")
 senha = st.sidebar.text_input("Senha Admin", type="password")
 sou_admin = (senha == "1234")
 
-if st.sidebar.button("🔄 SINCRONIZAR AGORA"):
+if st.sidebar.button("🔄 RECARREGAR DADOS"):
     st.session_state.jogos = buscar_dados()
     st.rerun()
 
 aba = st.sidebar.radio("Navegação", ["Jogos", "Classificação", "Ranking"])
 
-# --- CRIAR TORNEIO (ADMIN) ---
+# --- NOVO TORNEIO ---
 if aba == "Jogos" and sou_admin:
     with st.sidebar.expander("🏆 NOVO TORNEIO"):
         qtd = st.number_input("Times", 2, 8, 4)
@@ -86,7 +93,7 @@ if aba == "Jogos" and sou_admin:
 if aba == "Jogos":
     st.header("⚽ Partidas")
     if not st.session_state.jogos:
-        st.warning("Nenhum jogo encontrado. O Admin precisa criar o torneio.")
+        st.warning("Use o Admin para criar o torneio.")
     else:
         for i, j in enumerate(st.session_state.jogos):
             with st.container(border=True):
@@ -107,36 +114,20 @@ if aba == "Jogos":
                             salvar_na_nuvem(st.session_state.jogos)
                             st.rerun()
 
-                # APOSTAS
-                with st.expander("💰 APOSTAS"):
-                    col_ap, col_lst = st.columns([1, 2])
-                    with col_ap:
-                        if j['apostas_abertas'] and not j['finalizado']:
-                            n = st.text_input("Seu Nome", key=f"n_{i}")
-                            v = st.number_input("Valor R$", 1.0, 500.0, 10.0, key=f"v_{i}")
-                            o = st.radio("Palpite", [j['a'], "Empate", j['b']], key=f"o_{i}")
-                            if st.button("Confirmar Aposta", key=f"b_{i}"):
-                                trad = "A" if o == j['a'] else "B" if o == j['b'] else "E"
-                                st.session_state.jogos[i]['apostas'].append({"nome": n, "valor": v, "opcao": trad})
-                                salvar_na_nuvem(st.session_state.jogos)
-                                st.rerun()
-                    with col_lst:
-                        if j['apostas']: st.table(pd.DataFrame(j['apostas']))
-
-# --- TELA DE CLASSIFICAÇÃO ---
+# --- TELA DE CLASSIFICAÇÃO (AQUI O FILTRO FOI REFEITO) ---
 elif aba == "Classificação":
     st.header("📊 Tabela de Classificação")
-    # Forçar busca fresca para os amigos verem
-    st.session_state.jogos = buscar_dados()
+    jogos_frescos = buscar_dados() # Busca direto da nuvem
     
-    if not st.session_state.jogos:
-        st.error("Não há jogos para calcular a tabela.")
+    if not jogos_frescos:
+        st.error("Sem jogos carregados.")
     else:
-        times = sorted(list(set([j['a'] for j in st.session_state.jogos] + [j['b'] for j in st.session_state.jogos])))
+        times = sorted(list(set([j['a'] for j in jogos_frescos] + [j['b'] for j in jogos_frescos])))
         stats = {t: {"P":0,"V":0,"E":0,"D":0,"GP":0,"GC":0} for t in times}
         
-        for j in st.session_state.jogos:
-            if j['finalizado'] and j['ga'] is not None:
+        for j in jogos_frescos:
+            # Lógica reforçada: se tem gols e está finalizado
+            if j['finalizado'] is True and j['ga'] is not None and j['gb'] is not None:
                 a, b, ga, gb = j['a'], j['b'], int(j['ga']), int(j['gb'])
                 stats[a]['GP'] += ga; stats[a]['GC'] += gb
                 stats[b]['GP'] += gb; stats[b]['GC'] += ga
@@ -144,16 +135,16 @@ elif aba == "Classificação":
                 elif gb > ga: stats[b]['P'] += 3; stats[b]['V'] += 1; stats[a]['D'] += 1
                 else: stats[a]['P'] += 1; stats[b]['P'] += 1; stats[a]['E'] += 1; stats[b]['E'] += 1
         
-        df_tab = pd.DataFrame.from_dict(stats, orient='index').sort_values(by="P", ascending=False)
+        df_tab = pd.DataFrame.from_dict(stats, orient='index').sort_values(by=["P", "V"], ascending=False)
         st.table(df_tab)
 
-# --- TELA DE RANKING ---
+# --- RANKING ---
 elif aba == "Ranking":
-    st.header("💰 Lucro dos Apostadores")
-    st.session_state.jogos = buscar_dados()
+    st.header("💰 Saldo das Apostas")
+    jogos_frescos = buscar_dados()
     lucros = {}
-    for j in st.session_state.jogos:
-        if j['finalizado']:
+    for j in jogos_frescos:
+        if j['finalizado'] is True:
             res = "A" if j['ga'] > j['gb'] else "B" if j['ga'] < j['gb'] else "E"
             pote = sum(a['valor'] for a in j['apostas'])
             venc = sum(a['valor'] for a in j['apostas'] if a['opcao'] == res)
