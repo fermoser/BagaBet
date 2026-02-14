@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import itertools
-from st_tigris import get_tigris_client
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="BAGABET PRO", layout="wide", page_icon="⚽")
@@ -22,25 +21,16 @@ collection = conectar_banco()
 
 # --- FUNÇÕES DE PERSISTÊNCIA ---
 def salvar_dados():
-    if collection:
-        doc = {
-            "id": "dados_permanentes",
-            "times": st.session_state.times,
-            "jogos": st.session_state.jogos
-        }
-        collection.insert_or_replace([doc])
-        st.toast("Dados sincronizados na nuvem! ☁️")
+    # Aqui você pode manter o st.toast para simular o save
+    st.toast("Dados salvos na sessão local! 💾")
 
+# --- CONEXÃO ALTERNATIVA (SEM ST-TIGRIS) ---
+# Se o instalador está travando, vamos usar o estado da sessão 
+# Enquanto resolvemos a instalação, o site vai funcionar, mas resetará ao reiniciar.
 def carregar_dados():
-    if collection and 'times' not in st.session_state:
-        try:
-            doc = collection.find_one({"id": "dados_permanentes"})
-            if doc:
-                st.session_state.times = doc["times"]
-                st.session_state.jogos = doc["jogos"]
-                return
-        except:
-            pass
+    if 'times' not in st.session_state:
+        st.session_state.times = []
+        st.session_state.jogos = []
     
     if 'times' not in st.session_state:
         st.session_state.times = []
@@ -145,3 +135,4 @@ elif menu == "📊 Classificação":
     st.header("Tabela do Campeonato")
     if st.session_state.times:
         st.table(recalcular_tabela())
+
