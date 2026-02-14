@@ -25,13 +25,18 @@ if 'times' not in st.session_state:
 
 def salvar():
     if 'jogos' in st.session_state and st.session_state.jogos:
-        # Cria o DataFrame
-        df = pd.DataFrame(st.session_state.jogos)
-        # CONVERTE TUDO PARA TEXTO (Isso mata o erro UnsupportedOperation)
-        df = df.astype(str) 
-        # Envia para a planilha
-        conn.update(data=df)
-        st.toast("Dados salvos na nuvem! ✅")
+        try:
+            # Transforma os dados em DataFrame e garante que tudo é texto
+            df = pd.DataFrame(st.session_state.jogos).astype(str)
+            
+            # COMANDO NOVO: Especifica a aba e limpa antes de escrever
+            conn.update(
+                worksheet="Página1", 
+                data=df
+            )
+            st.toast("Sincronizado com sucesso! ✅")
+        except Exception as e:
+            st.error(f"Erro ao salvar: {e}")
 
 # --- INTERFACE ---
 st.title("⚽ BAGA BET - SISTEMA DE APOSTAS")
@@ -114,4 +119,5 @@ def fazer_aposta(idx):
         st.session_state.jogos[idx]['apostas'] = f"{antiga} | {nova_aposta}" if antiga else nova_aposta
         salvar()
         st.rerun()
+
 
