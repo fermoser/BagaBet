@@ -13,11 +13,15 @@ def money(v):
 
 # --- FUNÇÕES DE BANCO DE DADOS ---
 def salvar_nuvem():
-    if 'jogos' in st.session_state:
+    if 'jogos' in st.session_state and st.session_state.jogos:
         df = pd.DataFrame(st.session_state.jogos)
         # Transformamos a lista de apostas em texto para salvar no Sheets
-        df['apostas'] = df['apostas'].apply(lambda x: "|".join([f"{a['nome']}:{a['valor']}:{a['opcao']}" for a in x]))
+        df['apostas'] = df['apostas'].apply(lambda x: "|".join([f"{a['nome']}:{a['valor']}:{a['opcao']}" for a in x]) if x else "")
         conn.update(data=df)
+    else:
+        # Se não há jogos, enviamos um DataFrame vazio para limpar a nuvem
+        df_vazio = pd.DataFrame(columns=['a', 'b', 'ga', 'gb', 'finalizado', 'apostas'])
+        conn.update(data=df_vazio)
 
 def carregar_nuvem():
     try:
@@ -26,30 +30,32 @@ def carregar_nuvem():
             jogos_lidos = df.to_dict('records')
             for j in jogos_lidos:
                 # Reconvertemos o texto de apostas em lista de dicionários
-                if str(j['apostas']) != "nan" and j['apostas']:
-                    lista = []
+                j['apostas'] = []
+                if str(j.get('apostas', "")) != "nan" and j.get('apostas', ""):
                     for item in str(j['apostas']).split("|"):
                         partes = item.split(":")
                         if len(partes) == 3:
-                            lista.append({"nome": partes[0], "valor": float(partes[1]), "opcao": partes[2]})
-                    j['apostas'] = lista
-                else:
-                    j['apostas'] = []
+                            j['apostas'].append({"nome": partes[0], "valor": float(partes[1]), "opcao": partes[2]})
+                
                 # Ajuste de tipos
-                j['ga'] = int(j['ga']) if str(j['ga']) != "None" and str(j['ga']) != "nan" else None
-                j['gb'] = int(j['gb']) if str(j['gb']) != "None" and str(j['gb']) != "nan" else None
+                j['ga'] = int(j['ga']) if str(j['ga']) not in ["None", "nan", ""] else None
+                j['gb'] = int(j['gb']) if str(j['gb']) not in ["None", "nan", ""] else None
                 j['finalizado'] = str(j['finalizado']) == "True"
+            
             st.session_state.jogos = jogos_lidos
-            # Extrai times únicos
             st.session_state.times = list(set([j['a'] for j in jogos_lidos] + [j['b'] for j in jogos_lidos]))
+        else:
+            st.session_state.jogos = []
+            st.session_state.times = []
     except:
         st.session_state.jogos = []
         st.session_state.times = []
 
-# --- LÓGICA DO TORNEIO ---
+# --- INICIALIZAÇÃO ---
 if 'jogos' not in st.session_state:
     carregar_nuvem()
 
+# --- LÓGICA DE CLASSIFICAÇÃO ---
 def gerar_classificacao():
     cl = {t: {"P":0,"V":0,"E":0,"D":0,"GP":0,"GC":0,"SG":0} for t in st.session_state.times}
     for j in st.session_state.jogos:
@@ -66,18 +72,29 @@ def gerar_classificacao():
     for t in cl: cl[t]["SG"] = cl[t]["GP"] - cl[t]["GC"]
     return pd.DataFrame.from_dict(cl, orient='index').sort_values(by=["P", "V", "SG"], ascending=False)
 
-# --- INTERFACE ---
+# --- SIDEBAR ---
 st.sidebar.title("BAGA BET ⚽")
 menu = st.sidebar.radio("Navegação", ["Jogos", "Classificação", "Ranking Apostas", "Novo Torneio"])
 
+st.sidebar.markdown("---")
+if st.sidebar.button("⚠️ RESETAR TORNEIO", type="secondary", use_container_width=True):
+    st.session_state.jogos = []
+    st.session_state.times = []
+    salvar_nuvem()
+    st.sidebar.success("Tudo limpo!")
+    st.rerun()
+
+# --- CONTEÚDO ---
 if menu == "Novo Torneio":
     st.header("🏆 Configurar Novo Torneio")
     qtd = st.number_input("Quantidade de Times", 2, 20, 4)
     nomes = []
+    c1, c2 = st.columns(2)
     for i in range(qtd):
-        nomes.append(st.text_input(f"Time {i+1}", key=f"t{i}"))
+        with (c1 if i % 2 == 0 else c2):
+            nomes.append(st.text_input(f"Time {i+1}", key=f"t{i}"))
     
-    if st.button("GERAR CONFRONTOS (Todos contra Todos)"):
+    if st.button("GERAR CONFRONTOS", type="primary"):
         times = [n for n in nomes if n]
         if len(times) >= 2:
             pares = list(itertools.combinations(times, 2))
@@ -89,86 +106,79 @@ if menu == "Novo Torneio":
             st.rerun()
 
 elif menu == "Jogos":
-    # --- SEÇÃO DE APOSTAS E FINANCEIRO ---
-            exp = st.expander("💰 Painel de Apostas e Resultados")
-            
-            # Cálculos Financeiros em Tempo Real
-            apostas_jogo = j['apostas']
-            total_a = sum(a['valor'] for a in apostas_jogo if a['opcao'] == "A")
-            total_b = sum(a['valor'] for a in apostas_jogo if a['opcao'] == "B")
-            total_e = sum(a['valor'] for a in apostas_jogo if a['opcao'] == "E")
-            total_geral = total_a + total_b + total_e
-
-            # 1. LINHA DE MÉTRICAS (Resumo do Dinheiro)
-            m1, m2, m3, m4 = exp.columns(4)
-            m1.metric(f"No {j['a']}", money(total_a))
-            m2.metric("No Empate", money(total_e))
-            m3.metric(f"No {j['b']}", money(total_b))
-            m4.metric("TOTAL NO POTE", money(total_geral), delta_color="normal")
-
-            st.divider()
-
-            c1, c2 = exp.columns([1, 1.5]) # Coluna menor para input, maior para histórico
-            
-            # 2. COLUNA DA ESQUERDA: REGISTRAR NOVA APOSTA
-            with c1:
-                st.subheader("Nova Aposta")
-                nome_ap = st.text_input("Nome do Apostador", key=f"n_ap{i}")
-                valor_ap = st.number_input("Valor R$", 1.0, 5000.0, 10.0, key=f"v_ap{i}")
-                opc_ap = st.radio("Palpite", [j['a'], "Empate", j['b']], key=f"o_ap{i}", horizontal=True)
+    st.header("⚽ Calendário de Jogos")
+    if not st.session_state.jogos:
+        st.info("Nenhum torneio ativo. Vá em 'Novo Torneio'.")
+    else:
+        for i, j in enumerate(st.session_state.jogos):
+            with st.container(border=True):
+                col1, col2, col3 = st.columns([2, 1, 2])
+                res_a = j['ga'] if j['ga'] is not None else "-"
+                res_b = j['gb'] if j['gb'] is not None else "-"
                 
-                if st.button("Confirmar Aposta", key=f"btn_ap{i}", use_container_width=True):
-                    if nome_ap:
-                        trad = "A" if opc_ap == j['a'] else "B" if opc_ap == j['b'] else "E"
-                        st.session_state.jogos[i]['apostas'].append({
-                            "nome": nome_ap, 
-                            "valor": valor_ap, 
-                            "opcao": trad
-                        })
-                        salvar_nuvem()
-                        st.success("Aposta registrada!")
-                        st.rerun()
-                    else:
-                        st.error("Digite o nome do apostador!")
+                col1.markdown(f"<h2 style='text-align: right;'>{j['a']}</h2>", unsafe_allow_html=True)
+                col2.markdown(f"<h1 style='text-align: center;'>{res_a} x {res_b}</h1>", unsafe_allow_html=True)
+                col3.markdown(f"<h2 style='text-align: left;'>{j['b']}</h2>", unsafe_allow_html=True)
+                
+                # PAINEL DE APOSTAS
+                exp = st.expander("💰 Painel de Apostas e Resultados")
+                
+                ap = j['apostas']
+                t_a = sum(x['valor'] for x in ap if x['opcao'] == "A")
+                t_b = sum(x['valor'] for x in ap if x['opcao'] == "B")
+                t_e = sum(x['valor'] for x in ap if x['opcao'] == "E")
+                total = t_a + t_b + t_e
 
-            # 3. COLUNA DA DIREITA: HISTÓRICO DE APOSTAS
-            with c2:
-                st.subheader("Histórico de Apostas")
-                if apostas_jogo:
-                    # Criar DataFrame para mostrar bonitinho
-                    df_ap = pd.DataFrame(apostas_jogo)
-                    # Traduzir as siglas A, B, E para os nomes dos times para o usuário ver
-                    df_ap['Palpite'] = df_ap['opcao'].map({"A": j['a'], "B": j['b'], "E": "Empate"})
-                    df_ap['Valor'] = df_ap['valor'].apply(money)
-                    st.dataframe(df_ap[['nome', 'Palpite', 'Valor']], use_container_width=True, hide_index=True)
-                else:
-                    st.info("Nenhuma aposta para este jogo ainda.")
+                m1, m2, m3, m4 = exp.columns(4)
+                m1.metric(f"No {j['a']}", money(t_a))
+                m2.metric("No Empate", money(t_e))
+                m3.metric(f"No {j['b']}", money(t_b))
+                m4.metric("POTE TOTAL", money(total))
 
-            st.divider()
-            
-            # 4. LANÇAR PLACAR (Fica no rodapé do expander)
-            st.subheader("Finalizar Jogo")
-            p1, p2, p3 = st.columns([1, 1, 1])
-            ga_input = p1.number_input(f"Gols {j['a']}", 0, 50, int(j['ga'] or 0), key=f"ga_in{i}")
-            p2.markdown("<h3 style='text-align: center;'>X</h3>", unsafe_allow_html=True)
-            gb_input = p3.number_input(f"Gols {j['b']}", 0, 50, int(j['gb'] or 0), key=f"gb_in{i}")
-            
-            if st.button("SALVAR PLACAR FINAL", key=f"btn_res{i}", use_container_width=True, type="primary"):
-                st.session_state.jogos[i]['ga'] = ga_input
-                st.session_state.jogos[i]['gb'] = gb_input
-                st.session_state.jogos[i]['finalizado'] = True
-                salvar_nuvem()
-                st.rerun()
+                st.divider()
+                
+                ca, cb = exp.columns([1, 1.5])
+                with ca:
+                    st.subheader("Nova Aposta")
+                    n_ap = st.text_input("Nome", key=f"n{i}")
+                    v_ap = st.number_input("Valor R$", 1.0, 5000.0, 10.0, key=f"v{i}")
+                    o_ap = st.radio("Palpite", [j['a'], "Empate", j['b']], key=f"o{i}", horizontal=True)
+                    if st.button("Confirmar Aposta", key=f"ba{i}"):
+                        if n_ap:
+                            trad = "A" if o_ap == j['a'] else "B" if o_ap == j['b'] else "E"
+                            st.session_state.jogos[i]['apostas'].append({"nome": n_ap, "valor": v_ap, "opcao": trad})
+                            salvar_nuvem()
+                            st.rerun()
+
+                with cb:
+                    st.subheader("Histórico")
+                    if ap:
+                        df_ap = pd.DataFrame(ap)
+                        df_ap['Palpite'] = df_ap['opcao'].map({"A": j['a'], "B": j['b'], "E": "Empate"})
+                        df_ap['Valor'] = df_ap['valor'].apply(money)
+                        st.dataframe(df_ap[['nome', 'Palpite', 'Valor']], use_container_width=True, hide_index=True)
+
+                st.divider()
+                st.subheader("Finalizar Jogo")
+                p1, p2, p3 = st.columns(3)
+                ga_in = p1.number_input(f"Gols {j['a']}", 0, 50, int(j['ga'] or 0), key=f"ga{i}")
+                gb_in = p3.number_input(f"Gols {j['b']}", 0, 50, int(j['gb'] or 0), key=f"gb{i}")
+                if st.button("SALVAR PLACAR FINAL", key=f"br{i}", type="primary", use_container_width=True):
+                    st.session_state.jogos[i]['ga'] = ga_in
+                    st.session_state.jogos[i]['gb'] = gb_in
+                    st.session_state.jogos[i]['finalizado'] = True
+                    salvar_nuvem()
+                    st.rerun()
+
 elif menu == "Classificação":
     st.header("📊 Tabela de Classificação")
     if st.session_state.jogos:
-        df_cl = gerar_classificacao()
-        st.table(df_cl)
+        st.table(gerar_classificacao())
     else:
-        st.info("Nenhum jogo finalizado.")
+        st.info("Aguardando jogos.")
 
 elif menu == "Ranking Apostas":
-    st.header("💰 Ranking de Apostadores")
+    st.header("💰 Ranking Geral")
     ranking = {}
     for j in st.session_state.jogos:
         if not j["finalizado"]: continue
@@ -182,10 +192,5 @@ elif menu == "Ranking Apostas":
                 ranking[a["nome"]]["ga"] += (a["valor"] / venc_val * pool)
     
     if ranking:
-        dados_r = []
-        for n, d in ranking.items():
-            dados_r.append({"Nome": n, "Apostado": money(d['ap']), "Ganho": money(d['ga']), "Saldo": money(d['ga']-d['ap'])})
-        st.table(pd.DataFrame(dados_r))
-    else:
-        st.info("Aguardando finalização de jogos com apostas.")
-
+        dr = [{"Nome": n, "Apostado": money(d['ap']), "Ganho": money(d['ga']), "Saldo": money(d['ga']-d['ap'])} for n, d in ranking.items()]
+        st.table(pd.DataFrame(dr))
