@@ -89,28 +89,29 @@ elif menu == "Jogos":
     else:
         for i, j in enumerate(st.session_state.jogos):
             with st.container(border=True):
-                # CABEÇALHO DO JOGO
+                # CABEÇALHO DO JOGO (Placar Principal)
                 c1, c2, c3 = st.columns([2, 1, 2])
                 res_a, res_b = (j['ga'] if j['ga'] is not None else "-"), (j['gb'] if j['gb'] is not None else "-")
                 c1.markdown(f"<h2 style='text-align:right; margin:0;'>{j['a']}</h2>", unsafe_allow_html=True)
                 c2.markdown(f"<h1 style='text-align:center; margin:0; color:#FF4B4B;'>{res_a} x {res_b}</h1>", unsafe_allow_html=True)
                 c3.markdown(f"<h2 style='text-align:left; margin:0;'>{j['b']}</h2>", unsafe_allow_html=True)
 
-                # LANÇAMENTO DE RESULTADO (ADMIN)
+                # LANÇAMENTO DE RESULTADO (ADMIN) - Agora em Expander e com letras maiores
                 if sou_admin and not j['finalizado']:
-                    st.divider()
-                    l1, l2, l3, l4 = st.columns([1, 0.2, 1, 2])
-                    ga_in = l1.number_input(f"Gols {j['a']}", 0, 99, key=f"ga_input_{i}")
-                    l2.markdown("<h3 style='text-align:center;'>x</h3>", unsafe_allow_html=True)
-                    gb_in = l3.number_input(f"Gols {j['b']}", 0, 99, key=f"gb_input_{i}")
-                    if l4.button("🏆 FINALIZAR JOGO", key=f"btn_f_{i}", type="primary", use_container_width=True):
-                        st.session_state.jogos[i]['ga'] = ga_in
-                        st.session_state.jogos[i]['gb'] = gb_in
-                        st.session_state.jogos[i]['finalizado'] = True
-                        st.session_state.jogos[i]['apostas_abertas'] = False # Tranca ao finalizar
-                        salvar_nuvem(); st.rerun()
+                    with st.expander("⚙️ LANÇAR PLACAR FINAL (ADMIN)"):
+                        st.markdown("### Digite o Resultado:")
+                        l1, l2, l3 = st.columns([2, 2, 2])
+                        # Aumentado o label com Markdown para ficar legível
+                        ga_in = l1.number_input(f"GOLS {j['a'].upper()}", 0, 99, key=f"ga_input_{i}", step=1)
+                        gb_in = l2.number_input(f"GOLS {j['b'].upper()}", 0, 99, key=f"gb_input_{i}", step=1)
+                        if l3.button("🏆 FINALIZAR JOGO", key=f"btn_f_{i}", type="primary", use_container_width=True):
+                            st.session_state.jogos[i]['ga'] = ga_in
+                            st.session_state.jogos[i]['gb'] = gb_in
+                            st.session_state.jogos[i]['finalizado'] = True
+                            st.session_state.jogos[i]['apostas_abertas'] = False
+                            salvar_nuvem(); st.rerun()
 
-                # FINANCEIRO
+                # FINANCEIRO (Cards de Métricas)
                 ap = j['apostas']
                 t_a = sum(x['valor'] for x in ap if x['opcao'] == "A")
                 t_e = sum(x['valor'] for x in ap if x['opcao'] == "E")
@@ -124,23 +125,25 @@ elif menu == "Jogos":
                 m4.metric("POTE TOTAL", money(total_pote))
 
                 # EXPANDER DE APOSTAS
-                with st.expander("💰 Detalhes das Apostas"):
+                with st.expander("💰 DETALHES E NOVAS APOSTAS"):
                     col_ap, col_hist = st.columns([1.2, 2])
                     
                     with col_ap:
-                        # Verifica se as apostas estão abertas especificamente PARA ESTE JOGO
                         if j.get('apostas_abertas') == True and not j['finalizado']:
-                            st.subheader("Nova Aposta")
-                            n_ap = st.text_input("Nome", key=f"name_{i}")
-                            v_ap = st.number_input("Valor R$", 1.0, 1000.0, 10.0, key=f"val_{i}")
+                            st.markdown("#### Nova Aposta")
+                            n_ap = st.text_input("Nome do Apostador", key=f"name_{i}", placeholder="Ex: João")
+                            # Step=1.0 faz aumentar de 1 em 1 real
+                            v_ap = st.number_input("Valor R$", 1.0, 5000.0, 10.0, step=1.0, key=f"val_{i}")
                             o_ap = st.radio("Palpite", [j['a'], "Empate", j['b']], key=f"opt_{i}", horizontal=True)
-                            if st.button("Confirmar", key=f"save_ap_{i}", use_container_width=True):
+                            
+                            if st.button("Confirmar Aposta", key=f"save_ap_{i}", use_container_width=True):
                                 if n_ap:
                                     trad = "A" if o_ap == j['a'] else "B" if o_ap == j['b'] else "E"
                                     st.session_state.jogos[i]['apostas'].append({"nome": n_ap, "valor": v_ap, "opcao": trad})
                                     salvar_nuvem(); st.rerun()
                             
                             if sou_admin:
+                                st.divider()
                                 if st.button("🚫 Trancar Apostas", key=f"lock_{i}", use_container_width=True):
                                     st.session_state.jogos[i]['apostas_abertas'] = False
                                     salvar_nuvem(); st.rerun()
@@ -152,6 +155,7 @@ elif menu == "Jogos":
                                     salvar_nuvem(); st.rerun()
 
                     with col_hist:
+                        st.markdown("#### Histórico do Jogo")
                         if ap:
                             df = pd.DataFrame(ap)
                             df['Palpite'] = df['opcao'].map({"A": j['a'], "B": j['b'], "E": "Empate"})
@@ -165,6 +169,8 @@ elif menu == "Jogos":
                             else:
                                 df['Aposta'] = df['valor'].apply(money)
                                 st.dataframe(df[['nome', 'Palpite', 'Aposta']], use_container_width=True, hide_index=True)
+                        else:
+                            st.info("Sem apostas registradas.")
 
 elif menu == "Classificação":
     st.header("📊 Classificação")
@@ -201,3 +207,4 @@ elif menu == "Ranking Apostas":
         st.dataframe(pd.DataFrame(dr).sort_values("Lucro", ascending=False), use_container_width=True, hide_index=True)
     else:
         st.info("O ranking será exibido após a finalização dos jogos.")
+
