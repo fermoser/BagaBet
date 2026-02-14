@@ -16,6 +16,7 @@ def salvar():
             
             # Tenta atualizar. Se der erro de "Unsupported", ele tenta um caminho alternativo
             conn.update(worksheet="Página1", data=df)
+            st.write("Dados que tentei salvar:", df)
             st.toast("Sincronizado! ✅")
         except Exception as e:
             # Se o update falhar, tentamos avisar o que houve
@@ -90,4 +91,5 @@ elif menu == "Jogos":
                     fazer_aposta(i)
                 if jogo['apostas'] != "nan" and jogo['apostas']:
                     st.caption(f"Palpites: {jogo['apostas']}")
+
 
