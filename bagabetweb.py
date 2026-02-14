@@ -8,25 +8,25 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def carregar_dados():
 try:
-df = conn.read(ttl=0)
-if not df.empty:
-st.session_state.jogos = df.to_dict('records')
-t_a = df['a'].astype(str).tolist() if 'a' in df else []
-t_b = df['b'].astype(str).tolist() if 'b' in df else []
-st.session_state.times = list(set(t_a + t_b))
+    df = conn.read(ttl=0)
+        if not df.empty:
+            st.session_state.jogos = df.to_dict('records')
+            t_a = df['a'].astype(str).tolist() if 'a' in df else []
+            t_b = df['b'].astype(str).tolist() if 'b' in df else []
+            st.session_state.times = list(set(t_a + t_b))
 except:
-if 'times' not in st.session_state:
-st.session_state.times = []
-st.session_state.jogos = []
+        if 'times' not in st.session_state:
+            st.session_state.times = []
+            st.session_state.jogos = []
 
 if 'times' not in st.session_state:
 carregar_dados()
 
 def salvar():
-if 'jogos' in st.session_state and st.session_state.jogos:
-df = pd.DataFrame(st.session_state.jogos).astype(str)
-conn.update(data=df)
-st.toast("Salvo no Google Sheets!")
+     if 'jogos' in st.session_state and st.session_state.jogos:
+        df = pd.DataFrame(st.session_state.jogos).astype(str)
+        conn.update(data=df)
+        st.toast("Salvo no Google Sheets!")
 
 st.title("⚽ BAGA BET - MODO NUVEM")
 menu = st.sidebar.radio("Menu", ["Jogos", "Tabela", "Novo Torneio"])
@@ -73,3 +73,4 @@ if st.button("Apostar"):
 st.session_state.jogos[idx]['apostas'] += f" | {nome}"
 salvar()
 st.rerun()
+
