@@ -1,26 +1,49 @@
 import streamlit as st
 import pandas as pd
 import itertools
+from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="BAGABET PRO", layout="wide", page_icon="⚽")
 
-# --- GERENCIAMENTO DE DADOS (LOCAL) ---
-# Como o Tigris está falhando na instalação, vamos usar o estado de sessão.
-# Os dados ficarão salvos enquanto o site estiver aberto.
-if 'times' not in st.session_state:
-    st.session_state.times = []
-    st.session_state.jogos = []
+# --- CONEXÃO COM GOOGLE SHEETS ---
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-def salvar_dados():
-    st.toast("Ação registrada com sucesso! ✅")
+def carregar_dados_nuvem():
+    try:
+        # Tenta ler a planilha (aba principal)
+        df = conn.read(ttl=0) # ttl=0 força a ler dados novos, sem cache
+        if not df.empty:
+            # Aqui convertemos a tabela de volta para o formato de lista do Python
+            # Isso é um pouco técnico, mas garante que o app entenda os dados
+            st.session_state.jogos = df.to_dict('records')
+            # Extrai os nomes dos times únicos das colunas 'a' e 'b'
+            times_a = df['a'].unique().tolist()
+            times_b = df['b'].unique().tolist()
+            st.session_state.times = list(set(times_a + times_b))
+    except:
+        if 'times' not in st.session_state:
+            st.session_state.times = []
+            st.session_state.jogos = []
+
+def salvar_dados_nuvem():
+    if 'jogos' in st.session_state and st.session_state.jogos:
+        df_para_salvar = pd.DataFrame(st.session_state.jogos)
+        # Limpa colunas de objetos complexos (como listas de apostas) para o Sheets não dar erro
+        # No Sheets, as apostas serão salvas como texto formatado
+        conn.update(data=df_para_salvar)
+        st.toast("Sincronizado com Google Sheets! 📈")
+
+# Inicializa dados
+if 'times' not in st.session_state:
+    carregar_dados_nuvem()
 
 # --- LÓGICA ESPORTIVA ---
 def recalcular_tabela():
     data = {t: {"Time": t, "P": 0, "V": 0, "E": 0, "D": 0, "GP": 0, "GC": 0, "SG": 0} for t in st.session_state.times}
     for j in st.session_state.jogos:
         if j.get("finalizado"):
-            ga, gb = j["ga"], j["gb"]
+            ga, gb = int(j["ga"]), int(j["gb"])
             ta, tb = j["a"], j["b"]
             data[ta]["GP"] += ga; data[ta]["GC"] += gb
             data[tb]["GP"] += gb; data[tb]["GC"] += ga
@@ -31,67 +54,66 @@ def recalcular_tabela():
             else:
                 data[ta]["P"] += 1; data[tb]["P"] += 1; data[ta]["E"] += 1; data[tb]["E"] += 1
     
-    for t in data: data[t]["SG"] = data[t]["GP"] - data[t]["GC"]
     df = pd.DataFrame(data.values())
-    return df.sort_values(by=["P", "V", "SG"], ascending=False).reset_index(drop=True) if not df.empty else df
+    return df.sort_values(by=["P", "V"], ascending=False).reset_index(drop=True) if not df.empty else df
 
-# --- MODAIS (JANELAS) ---
+# --- MODAIS ---
 @st.dialog("📝 Lançar Resultado")
 def modal_placar(idx):
     jogo = st.session_state.jogos[idx]
-    st.write(f"### {jogo['a']} vs {jogo['b']}")
-    col1, col2 = st.columns(2)
-    ga = col1.number_input(f"Gols {jogo['a']}", min_value=0, step=1)
-    gb = col2.number_input(f"Gols {jogo['b']}", min_value=0, step=1)
-    
-    if st.button("SALVAR PLACAR"):
+    ga = st.number_input(f"Gols {jogo['a']}", min_value=0, value=int(jogo['ga']))
+    gb = st.number_input(f"Gols {jogo['b']}", min_value=0, value=int(jogo['gb']))
+    if st.button("SALVAR"):
         st.session_state.jogos[idx]["ga"] = ga
         st.session_state.jogos[idx]["gb"] = gb
         st.session_state.jogos[idx]["finalizado"] = True
+        salvar_dados_nuvem()
         st.rerun()
 
 @st.dialog("🎲 Nova Aposta")
 def modal_aposta(idx):
     jogo = st.session_state.jogos[idx]
-    st.write(f"Apostar em: **{jogo['a']} x {jogo['b']}**")
     nome = st.text_input("Seu Nome")
     valor = st.number_input("Valor (R$)", min_value=1.0)
     escolha = st.radio("Palpite", [jogo['a'], "Empate", jogo['b']])
-    
     if st.button("CONFIRMAR"):
-        if nome:
-            st.session_state.jogos[idx]["apostas"].append({
-                "Nome": nome, "R$": valor, "Palpite": escolha
-            })
-            st.rerun()
+        if "apostas" not in st.session_state.jogos[idx] or isinstance(st.session_state.jogos[idx]["apostas"], float):
+             st.session_state.jogos[idx]["apostas"] = []
+        
+        # Guardamos a aposta como uma string simples para o Sheets aceitar fácil
+        nova_aposta = f"{nome}: {escolha} (R${valor})"
+        if isinstance(st.session_state.jogos[idx]["apostas"], str):
+            st.session_state.jogos[idx]["apostas"] += f" | {nova_aposta}"
+        else:
+            st.session_state.jogos[idx]["apostas"] = nova_aposta
+            
+        salvar_dados_nuvem()
+        st.rerun()
 
 # --- INTERFACE ---
-st.title("BAGA 🟢 BET")
+st.title("BAGA 🟢 BET - CLOUD")
 
-menu = st.sidebar.radio("Navegação", ["⚽ Jogos & Apostas", "📊 Classificação", "🏆 Novo Torneio"])
+menu = st.sidebar.radio("Navegação", ["⚽ Jogos", "📊 Tabela", "🏆 Novo Torneio"])
 
 if menu == "🏆 Novo Torneio":
-    st.header("Configurar Campeonato")
-    qtd = st.number_input("Qtd de times", 2, 20, 4)
-    nomes = [st.text_input(f"Time {i+1}", key=f"nt{i}") for i in range(qtd)]
-    if st.button("GERAR"):
+    qtd = st.number_input("Times", 2, 20, 4)
+    nomes = [st.text_input(f"Time {i+1}", key=f"n{i}") for i in range(qtd)]
+    if st.button("GERAR TORNEIO"):
         st.session_state.times = [n for n in nomes if n]
         pares = list(itertools.combinations(st.session_state.times, 2))
-        st.session_state.jogos = [{"a": p[0], "b": p[1], "ga": 0, "gb": 0, "finalizado": False, "apostas": []} for p in pares]
-        st.success("Torneio criado!")
+        st.session_state.jogos = [{"a": p[0], "b": p[1], "ga": 0, "gb": 0, "finalizado": False, "apostas": ""} for p in pares]
+        salvar_dados_nuvem()
+        st.success("Torneio Criado!")
 
-elif menu == "⚽ Jogos & Apostas":
-    st.header("Partidas")
+elif menu == "⚽ Jogos":
     for i, jogo in enumerate(st.session_state.jogos):
         with st.container(border=True):
-            c1, c2, c3 = st.columns([3, 1, 1])
-            status = "✅" if jogo["finalizado"] else "⏳"
-            c1.subheader(f"{status} {jogo['a']} {jogo['ga']} x {jogo['gb']} {jogo['b']}")
-            if c2.button("📝 Placar", key=f"p{i}"): modal_placar(i)
-            if c3.button("🎲 Apostar", key=f"a{i}"): modal_aposta(i)
-            
-            if jogo["apostas"]:
-                st.table(pd.DataFrame(jogo["apostas"]))
+            col1, col2, col3 = st.columns([3, 1, 1])
+            col1.write(f"**{jogo['a']} {jogo['ga']} x {jogo['gb']} {jogo['b']}**")
+            if col2.button("Placar", key=f"p{i}"): modal_placar(i)
+            if col3.button("Apostar", key=f"a{i}"): modal_aposta(i)
+            if jogo.get("apostas"):
+                st.caption(f"Apostas: {jogo['apostas']}")
 
-elif menu == "📊 Classificação":
+elif menu == "📊 Tabela":
     st.table(recalcular_tabela())
