@@ -151,24 +151,46 @@ elif menu == "Jogos":
                             st.rerun()
 
                 with cb:
-                    st.subheader("Histórico")
+                    st.subheader("Histórico e Rateio")
                     if ap:
                         df_ap = pd.DataFrame(ap)
+                        # Traduzir siglas para nomes
                         df_ap['Palpite'] = df_ap['opcao'].map({"A": j['a'], "B": j['b'], "E": "Empate"})
-                        df_ap['Valor'] = df_ap['valor'].apply(money)
-                        st.dataframe(df_ap[['nome', 'Palpite', 'Valor']], use_container_width=True, hide_index=True)
+                        
+                        # Se o jogo estiver finalizado, calculamos os ganhos
+                        if j['finalizado']:
+                            res_real = "A" if j['ga'] > j['gb'] else "B" if j['gb'] > j['ga'] else "E"
+                            venc_val = sum(x['valor'] for x in ap if x['opcao'] == res_real)
+                            
+                            def calcular_bruto(row):
+                                if row['opcao'] == res_real and venc_val > 0:
+                                    return (row['valor'] / venc_val) * total
+                                return 0.0
 
-                st.divider()
-                st.subheader("Finalizar Jogo")
-                p1, p2, p3 = st.columns(3)
-                ga_in = p1.number_input(f"Gols {j['a']}", 0, 50, int(j['ga'] or 0), key=f"ga{i}")
-                gb_in = p3.number_input(f"Gols {j['b']}", 0, 50, int(j['gb'] or 0), key=f"gb{i}")
-                if st.button("SALVAR PLACAR FINAL", key=f"br{i}", type="primary", use_container_width=True):
-                    st.session_state.jogos[i]['ga'] = ga_in
-                    st.session_state.jogos[i]['gb'] = gb_in
-                    st.session_state.jogos[i]['finalizado'] = True
-                    salvar_nuvem()
-                    st.rerun()
+                            df_ap['Bruto'] = df_ap.apply(calcular_bruto, axis=1)
+                            df_ap['Líquido'] = df_ap['Bruto'] - df_ap['valor']
+                            
+                            # Formatação para exibição
+                            df_exibir = df_ap.copy()
+                            df_exibir['Aposta'] = df_exibir['valor'].apply(money)
+                            df_exibir['Bruto'] = df_exibir['Bruto'].apply(money)
+                            df_exibir['Líquido'] = df_exibir['Líquido'].apply(money)
+                            
+                            st.dataframe(
+                                df_exibir[['nome', 'Palpite', 'Aposta', 'Bruto', 'Líquido']], 
+                                use_container_width=True, 
+                                hide_index=True
+                            )
+                            
+                            if venc_val == 0:
+                                st.warning("Não houve vencedores neste jogo. O pote acumulou (ou deve ser devolvido).")
+                        else:
+                            # Jogo aberto: mostra apenas o básico
+                            df_ap['Aposta'] = df_ap['valor'].apply(money)
+                            st.dataframe(df_ap[['nome', 'Palpite', 'Aposta']], use_container_width=True, hide_index=True)
+                            st.info("Aguardando resultado final para calcular lucros.")
+                    else:
+                        st.info("Nenhuma aposta registrada.")
 
 elif menu == "Classificação":
     st.header("📊 Tabela de Classificação")
@@ -194,3 +216,4 @@ elif menu == "Ranking Apostas":
     if ranking:
         dr = [{"Nome": n, "Apostado": money(d['ap']), "Ganho": money(d['ga']), "Saldo": money(d['ga']-d['ap'])} for n, d in ranking.items()]
         st.table(pd.DataFrame(dr))
+
