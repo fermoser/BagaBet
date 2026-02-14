@@ -7,89 +7,36 @@ from streamlit_gsheets import GSheetsConnection
 st.set_page_config(page_title="BAGA BET CLOUD", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 2. FUNÇÕES DE DADOS
+# 2. FUNÇÕES DE DADOS (COM DEBUG)
 def salvar():
     if 'jogos' in st.session_state and st.session_state.jogos:
+        df = pd.DataFrame(st.session_state.jogos).astype(str)
+        
+        # ISSO VAI MOSTRAR OS DADOS NA TELA PARA VOCÊ VER
+        st.subheader("DEBUG: Dados sendo enviados:")
+        st.write(df) 
+        
         try:
-            # Prepara os dados
-            df = pd.DataFrame(st.session_state.jogos).astype(str)
-            
-            # Tenta atualizar. Se der erro de "Unsupported", ele tenta um caminho alternativo
-            conn.update(worksheet="Página1", data=df)
-            st.write("Dados que tentei salvar:", df)
-            st.toast("Sincronizado! ✅")
+            # Tenta salvar sem especificar aba primeiro para ver se vai
+            conn.update(data=df)
+            st.success("Comando enviado ao Google Sheets! ✅")
         except Exception as e:
-            # Se o update falhar, tentamos avisar o que houve
-            st.error(f"Erro técnico ao salvar: {e}")
-            st.info("Dica: Verifique se a aba no Google Sheets se chama exatamente 'Página1'")
+            st.error(f"Erro na conexão: {e}")
 
 def carregar_dados():
     try:
-        df = conn.read(worksheet="Página1", ttl=0)
+        # Tenta ler a planilha
+        df = conn.read(ttl=0)
         if not df.empty:
             st.session_state.jogos = df.to_dict('records')
-            t_a = df['a'].astype(str).tolist() if 'a' in df else []
-            t_b = df['b'].astype(str).tolist() if 'b' in df else []
-            st.session_state.times = list(set(t_a + t_b))
+            # Reconstrói a lista de times única
+            times_a = df['a'].unique().tolist()
+            times_b = df['b'].unique().tolist()
+            st.session_state.times = list(set(times_a + times_b))
     except:
         st.session_state.jogos = []
         st.session_state.times = []
 
+# Inicialização
 if 'jogos' not in st.session_state:
     carregar_dados()
-
-# 3. FUNÇÕES DE DIÁLOGO (PRECISAM VIR ANTES DO MENU)
-@st.dialog("Lançar Placar")
-def lancar_placar(idx):
-    jogo = st.session_state.jogos[idx]
-    st.write(f"Jogo: {jogo['a']} x {jogo['b']}")
-    ga = st.number_input("Gols Mandante", value=int(jogo['ga']))
-    gb = st.number_input("Gols Visitante", value=int(jogo['gb']))
-    if st.button("Confirmar Resultado"):
-        st.session_state.jogos[idx]['ga'] = str(ga)
-        st.session_state.jogos[idx]['gb'] = str(gb)
-        st.session_state.jogos[idx]['finalizado'] = "True"
-        salvar()
-        st.rerun()
-
-@st.dialog("Fazer Aposta")
-def fazer_aposta(idx):
-    nome = st.text_input("Seu Nome")
-    palpite = st.radio("Quem vence?", ["Mandante", "Empate", "Visitante"])
-    if st.button("Registrar Palpite"):
-        nova = f"{nome}({palpite})"
-        antiga = st.session_state.jogos[idx]['apostas']
-        st.session_state.jogos[idx]['apostas'] = f"{antiga} | {nova}" if antiga != "nan" and antiga else nova
-        salvar()
-        st.rerun()
-
-# 4. MENU E INTERFACE
-st.title("⚽ BAGA BET - MODO NUVEM")
-menu = st.sidebar.radio("Navegação", ["Jogos", "Tabela", "Novo Torneio"])
-
-if menu == "Novo Torneio":
-    qtd = st.number_input("Times", 2, 20, 4)
-    nomes = [st.text_input(f"Time {i+1}", key=f"n{i}") for i in range(qtd)]
-    if st.button("GERAR NOVO TORNEIO"):
-        st.session_state.times = [n for n in nomes if n]
-        pares = list(itertools.combinations(st.session_state.times, 2))
-        st.session_state.jogos = [{"a": p[0], "b": p[1], "ga": "0", "gb": "0", "finalizado": "False", "apostas": ""} for p in pares]
-        salvar()
-        st.rerun()
-
-elif menu == "Jogos":
-    if not st.session_state.jogos:
-        st.info("Crie um torneio!")
-    else:
-        for i, jogo in enumerate(st.session_state.jogos):
-            with st.container(border=True):
-                st.write(f"**{jogo['a']} {jogo['ga']} x {jogo['gb']} {jogo['b']}**")
-                c1, c2 = st.columns(2)
-                if c1.button("Placar", key=f"p{i}"):
-                    lancar_placar(i)
-                if c2.button("Aposta", key=f"a{i}"):
-                    fazer_aposta(i)
-                if jogo['apostas'] != "nan" and jogo['apostas']:
-                    st.caption(f"Palpites: {jogo['apostas']}")
-
-
