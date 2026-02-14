@@ -1,141 +1,107 @@
 import streamlit as st
 import pandas as pd
 import itertools
-import json
+from st_tigris import get_tigris_client
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="BAGABET Web", page_icon="⚽", layout="wide")
+# --- CONFIGURAÇÃO TIGRIS ---
+try:
+    client = get_tigris_client()
+    db = client.get_database("bagabet_db")
+    collection = db.get_collection("torneios")
+except:
+    st.error("Erro ao conectar ao Tigris. Verifique se conectou o Data Source no Streamlit Cloud.")
 
-# Estilização customizada (CSS) para manter o visual verde
-st.markdown("""
-    <style>
-    .main { background-color: #f5f7fa; }
-    .stButton>button { background-color: #1DB954; color: white; border-radius: 8px; border: none; }
-    .stButton>button:hover { background-color: #179443; color: white; }
-    h1, h2, h3 { color: #1DB954; font-family: 'Segoe UI Black', sans-serif; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- INICIALIZAÇÃO DO ESTADO (BANCO DE DADOS) ---
-if 'jogos' not in st.session_state:
-    st.session_state.jogos = []
+# --- INICIALIZAÇÃO E PERSISTÊNCIA ---
 if 'times' not in st.session_state:
-    st.session_state.times = []
-if 'apostas' not in st.session_state:
-    st.session_state.apostas = {} # Dicionário para armazenar apostas por jogo
+    # Tenta carregar dados existentes do Tigris ao abrir o site
+    try:
+        doc = collection.find_one({"id": "principal"})
+        if doc:
+            st.session_state.times = doc["times"]
+            st.session_state.jogos = doc["jogos"]
+        else:
+            st.session_state.times = []
+            st.session_state.jogos = []
+    except:
+        st.session_state.times = []
+        st.session_state.jogos = []
 
-# --- FUNÇÕES DE LÓGICA ---
-def recalcular_tabela():
-    data = {t: {"Time": t, "P": 0, "V": 0, "E": 0, "D": 0, "GP": 0, "GC": 0, "SG": 0} for t in st.session_state.times}
-    for j in st.session_state.jogos:
-        if j["finalizado"]:
-            ga, gb = j["ga"], j["gb"]
-            ta, tb = j["a"], j["b"]
-            data[ta]["GP"] += ga; data[ta]["GC"] += gb
-            data[tb]["GP"] += gb; data[tb]["GC"] += ga
-            if ga > gb:
-                data[ta]["P"] += 3; data[ta]["V"] += 1; data[tb]["D"] += 1
-            elif gb > ga:
-                data[tb]["P"] += 3; data[tb]["V"] += 1; data[ta]["D"] += 1
-            else:
-                data[ta]["P"] += 1; data[tb]["P"] += 1; data[ta]["E"] += 1; data[tb]["E"] += 1
-    
-    for t in data: data[t]["SG"] = data[t]["GP"] - data[t]["GC"]
-    df = pd.DataFrame(data.values())
-    if not df.empty:
-        df = df.sort_values(by=["P", "V", "SG"], ascending=False).reset_index(drop=True)
-    return df
+def salvar_dados():
+    doc = {
+        "id": "principal",
+        "times": st.session_state.times,
+        "jogos": st.session_state.jogos
+    }
+    collection.insert_or_replace([doc])
 
-# --- MENU LATERAL ---
-with st.sidebar:
-    st.title("BAGA 🟢 BET")
-    st.write("Gestão de Torneios")
-    menu = st.radio("Navegar para:", ["🏠 Início", "🏆 Novo Torneio", "⚽ Jogos & Apostas", "📊 Classificação", "💰 Ranking"])
+# --- INTERFACE ---
+st.title("BAGA 🟢 BET - LIVE")
+
+menu = st.sidebar.radio("Navegação", ["🏠 Início", "🏆 Novo Torneio", "⚽ Jogos & Apostas", "📊 Classificação"])
+
+if menu == "🏆 Novo Torneio":
+    qtd = st.number_input("Qtd de Times", 2, 20, 4)
+    nomes = [st.text_input(f"Time {i+1}", key=f"t{i}") for i in range(qtd)]
     
-    st.divider()
-    if st.button("♻️ Resetar Sistema"):
-        st.session_state.clear()
+    if st.button("GERAR TORNEIO"):
+        st.session_state.times = [n for n in nomes if n]
+        pares = list(itertools.combinations(st.session_state.times, 2))
+        st.session_state.jogos = [{"a": p[0], "b": p[1], "ga": 0, "gb": 0, "finalizado": False, "apostas": []} for p in pares]
+        salvar_dados()
+        st.success("Torneio salvo no Tigris!")
         st.rerun()
 
-# --- TELAS ---
-if menu == "🏠 Início":
-    st.title("Bem-vindo ao BAGABET ⚽")
-    st.write("O seu gerenciador de torneios agora está na web.")
-    st.info("Use o menu lateral para configurar um novo torneio ou gerenciar seus jogos.")
-    
-    if st.session_state.times:
-        st.metric("Times Cadastrados", len(st.session_state.times))
-        st.metric("Jogos Realizados", len([j for j in st.session_state.jogos if j["finalizado"]]))
-
-elif menu == "🏆 Novo Torneio":
-    st.header("Configurar Novo Torneio")
-    qtd = st.number_input("Quantos times participarão?", min_value=2, max_value=20, value=4)
-    
-    with st.form("form_times"):
-        cols = st.columns(2)
-        nomes_input = []
-        for i in range(qtd):
-            col_idx = 0 if i < qtd/2 else 1
-            nome = cols[col_idx].text_input(f"Time {i+1}", placeholder=f"Ex: Time {i+1}")
-            nomes_input.append(nome)
-        
-        if st.form_submit_button("GERAR TORNEIO 🚀"):
-            times_limpos = [n for n in nomes_input if n.strip()]
-            if len(times_limpos) < 2:
-                st.error("Preencha pelo menos 2 nomes de times.")
-            else:
-                st.session_state.times = times_limpos
-                pares = list(itertools.combinations(times_limpos, 2))
-                st.session_state.jogos = [{"id": i, "a": p[0], "b": p[1], "ga": 0, "gb": 0, "finalizado": False} for i, p in enumerate(pares)]
-                st.success("Torneio gerado com sucesso!")
-                st.rerun()
-
 elif menu == "⚽ Jogos & Apostas":
-    st.header("Gerenciamento de Partidas")
+    st.header("⚽ Partidas e Palpites")
     
-    if not st.session_state.jogos:
-        st.warning("Nenhum torneio ativo. Vá em 'Novo Torneio'.")
-    else:
-        for i, jogo in enumerate(st.session_state.jogos):
-            with st.expander(f"{'✅' if jogo['finalizado'] else '⏳'} {jogo['a']} vs {jogo['b']}"):
-                col1, col2, col3 = st.columns([2, 1, 2])
-                
-                # Placar
-                ga = col1.number_input(f"Gols {jogo['a']}", min_value=0, value=jogo['ga'], key=f"ga_{i}")
-                gb = col3.number_input(f"Gols {jogo['b']}", min_value=0, value=jogo['gb'], key=f"gb_{i}")
-                
-                if st.button("Salvar Resultado", key=f"save_{i}"):
-                    st.session_state.jogos[i]["ga"] = ga
-                    st.session_state.jogos[i]["gb"] = gb
-                    st.session_state.jogos[i]["finalizado"] = True
-                    st.success("Placar atualizado!")
-                    st.rerun()
-                
-                st.divider()
-                st.subheader("Apostas")
-                # Sistema de Apostas simples
-                nome_ap = st.text_input("Nome do Apostador", key=f"ap_n_{i}")
-                valor_ap = st.number_input("Valor R$", min_value=1.0, key=f"ap_v_{i}")
-                escolha = st.selectbox("Palpite", [jogo['a'], "Empate", jogo['b']], key=f"ap_e_{i}")
-                
-                if st.button("Registrar Aposta", key=f"btn_ap_{i}"):
-                    if f"jogo_{i}" not in st.session_state.apostas:
-                        st.session_state.apostas[f"jogo_{i}"] = []
-                    
-                    st.session_state.apostas[f"jogo_{i}"].append({
-                        "nome": nome_ap, "valor": valor_ap, "palpite": escolha
-                    })
-                    st.toast(f"Aposta de {nome_ap} registrada!")
+    for i, jogo in enumerate(st.session_state.jogos):
+        with st.container(border=True):
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                status = "✅" if jogo["finalizado"] else "⏳"
+                st.subheader(f"{status} {jogo['a']} {jogo['ga']} x {jogo['gb']} {jogo['b']}")
+            
+            with col2:
+                # Botões de Ação
+                if st.button("📝 Placar", key=f"pl{i}"):
+                    editar_placar(i)
+                if st.button("🎲 Apostar", key=f"ap{i}"):
+                    nova_aposta(i)
 
-elif menu == "📊 Classificação":
-    st.header("Tabela de Classificação")
-    if not st.session_state.times:
-        st.info("Aguardando geração do torneio...")
-    else:
-        df_ranking = recalcular_tabela()
-        st.table(df_ranking)
+            # --- AQUI APARECEM AS APOSTAS (COMO NO ORIGINAL) ---
+            if jogo["apostas"]:
+                df_aps = pd.DataFrame(jogo["apostas"])
+                # Melhorando a visualização da tabela de apostas
+                st.markdown("**Apostas Registradas:**")
+                st.table(df_aps.rename(columns={'nome': 'Apostador', 'valor': 'R$', 'opcao': 'Palpite'}))
+            else:
+                st.caption("Nenhuma aposta neste jogo ainda.")
 
-elif menu == "💰 Ranking":
-    st.header("Ranking Financeiro")
-    st.write("Em breve: Cálculo automático de rateio de prêmios.")
-    # Aqui entraria a mesma lógica de cálculo de lucros que você já tem
+# --- MODAIS (DIALOGS) ---
+
+@st.dialog("Lançar Placar")
+def editar_placar(idx):
+    j = st.session_state.jogos[idx]
+    ga = st.number_input(f"Gols {j['a']}", value=j['ga'])
+    gb = st.number_input(f"Gols {j['b']}", value=j['gb'])
+    if st.button("Salvar e Sincronizar"):
+        st.session_state.jogos[idx]["ga"] = ga
+        st.session_state.jogos[idx]["gb"] = gb
+        st.session_state.jogos[idx]["finalizado"] = True
+        salvar_dados() # Manda pro Tigris
+        st.rerun()
+
+@st.dialog("Nova Aposta")
+def nova_aposta(idx):
+    j = st.session_state.jogos[idx]
+    nome = st.text_input("Seu Nome")
+    valor = st.number_input("Valor R$", 1.0)
+    op = st.radio("Palpite", [j['a'], "Empate", j['b']])
+    
+    if st.button("Confirmar"):
+        palpite = "A" if op == j['a'] else "B" if op == j['b'] else "E"
+        st.session_state.jogos[idx]["apostas"].append({"nome": nome, "valor": valor, "opcao": palpite})
+        salvar_dados() # Manda pro Tigris
+        st.success("Aposta registrada na nuvem!")
+        st.rerun()
