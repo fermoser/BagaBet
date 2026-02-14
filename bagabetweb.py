@@ -25,8 +25,11 @@ if 'times' not in st.session_state:
 
 def salvar():
     if 'jogos' in st.session_state and st.session_state.jogos:
-        # Transforma tudo em texto para o Google Sheets não dar erro de formato
-        df = pd.DataFrame(st.session_state.jogos).astype(str)
+        # Cria o DataFrame
+        df = pd.DataFrame(st.session_state.jogos)
+        # CONVERTE TUDO PARA TEXTO (Isso mata o erro UnsupportedOperation)
+        df = df.astype(str) 
+        # Envia para a planilha
         conn.update(data=df)
         st.toast("Dados salvos na nuvem! ✅")
 
@@ -111,3 +114,4 @@ def fazer_aposta(idx):
         st.session_state.jogos[idx]['apostas'] = f"{antiga} | {nova_aposta}" if antiga else nova_aposta
         salvar()
         st.rerun()
+
