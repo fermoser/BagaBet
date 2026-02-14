@@ -11,15 +11,16 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def money(v):
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# --- FUNÇÃO DE BUSCA (REFORÇADA) ---
+# --- BUSCA DE DADOS ---
 def buscar_dados():
     try:
+        # ttl=0 força a leitura do Google Sheets sem cache
         df = conn.read(ttl=0)
         if df is not None and not df.empty:
             df = df.dropna(subset=['a', 'b'])
             lista = df.to_dict('records')
             for j in lista:
-                # 1. Recuperar Apostas
+                # Recuperar Apostas
                 j['apostas'] = []
                 txt = str(j.get('apostas', ""))
                 if txt and txt not in ["nan", "None", ""]:
@@ -28,21 +29,18 @@ def buscar_dados():
                         if len(p) == 3:
                             j['apostas'].append({"nome": p[0], "valor": float(p[1]), "opcao": p[2]})
                 
-                # 2. Tratar Gols (Limpeza total)
+                # Tratar Gols como números (essencial para a tabela)
                 for col in ['ga', 'gb']:
                     val = str(j.get(col, ""))
+                    # Se for número (mesmo que seja "1.0"), converte
                     if val.replace('.','',1).strip().isdigit():
                         j[col] = int(float(val))
                     else:
                         j[col] = None
-
-                # 3. O SEGREDO: Tratar 'finalizado' de qualquer jeito (Texto ou Boleano)
+                
+                # Tratar Status
                 status = str(j.get('finalizado', "")).upper()
                 j['finalizado'] = status in ["TRUE", "1", "VERDADEIRO", "T"]
-                
-                status_ap = str(j.get('apostas_abertas', "")).upper()
-                j['apostas_abertas'] = status_ap in ["TRUE", "1", "VERDADEIRO", "T"]
-                
             return lista
     except:
         return []
@@ -50,7 +48,6 @@ def buscar_dados():
 
 def salvar_na_nuvem(dados):
     df_save = pd.DataFrame(dados)
-    # Garante que as colunas existam na ordem certa
     cols = ['a', 'b', 'ga', 'gb', 'finalizado', 'apostas_abertas', 'apostas']
     for c in cols:
         if c not in df_save.columns: df_save[c] = None
@@ -68,7 +65,7 @@ st.sidebar.title("BAGA BET ⚽")
 senha = st.sidebar.text_input("Senha Admin", type="password")
 sou_admin = (senha == "1234")
 
-if st.sidebar.button("🔄 RECARREGAR DADOS"):
+if st.sidebar.button("🔄 FORÇAR ATUALIZAÇÃO"):
     st.session_state.jogos = buscar_dados()
     st.rerun()
 
@@ -93,7 +90,7 @@ if aba == "Jogos" and sou_admin:
 if aba == "Jogos":
     st.header("⚽ Partidas")
     if not st.session_state.jogos:
-        st.warning("Use o Admin para criar o torneio.")
+        st.info("Crie o torneio no menu lateral.")
     else:
         for i, j in enumerate(st.session_state.jogos):
             with st.container(border=True):
@@ -114,37 +111,42 @@ if aba == "Jogos":
                             salvar_na_nuvem(st.session_state.jogos)
                             st.rerun()
 
-# --- TELA DE CLASSIFICAÇÃO (AQUI O FILTRO FOI REFEITO) ---
+# --- TELA DE CLASSIFICAÇÃO (LÓGICA BLINDADA) ---
 elif aba == "Classificação":
     st.header("📊 Tabela de Classificação")
-    jogos_frescos = buscar_dados() # Busca direto da nuvem
+    df_nuvem = buscar_dados() # Lê o Sheets agora
     
-    if not jogos_frescos:
-        st.error("Sem jogos carregados.")
+    if not df_nuvem:
+        st.error("Não foi possível ler os dados da nuvem.")
     else:
-        times = sorted(list(set([j['a'] for j in jogos_frescos] + [j['b'] for j in jogos_frescos])))
-        stats = {t: {"P":0,"V":0,"E":0,"D":0,"GP":0,"GC":0} for t in times}
+        times = sorted(list(set([j['a'] for j in df_nuvem] + [j['b'] for j in df_nuvem])))
+        stats = {t: {"P":0,"V":0,"E":0,"D":0,"GP":0,"GC":0,"SG":0} for t in times}
         
-        for j in jogos_frescos:
-            # Lógica reforçada: se tem gols e está finalizado
-            if j['finalizado'] is True and j['ga'] is not None and j['gb'] is not None:
+        for j in df_nuvem:
+            # NOVIDADE: Calcula se tiver gols, independente do campo 'finalizado'
+            if j['ga'] is not None and j['gb'] is not None:
                 a, b, ga, gb = j['a'], j['b'], int(j['ga']), int(j['gb'])
                 stats[a]['GP'] += ga; stats[a]['GC'] += gb
                 stats[b]['GP'] += gb; stats[b]['GC'] += ga
-                if ga > gb: stats[a]['P'] += 3; stats[a]['V'] += 1; stats[b]['D'] += 1
-                elif gb > ga: stats[b]['P'] += 3; stats[b]['V'] += 1; stats[a]['D'] += 1
-                else: stats[a]['P'] += 1; stats[b]['P'] += 1; stats[a]['E'] += 1; stats[b]['E'] += 1
+                if ga > gb: 
+                    stats[a]['P'] += 3; stats[a]['V'] += 1; stats[b]['D'] += 1
+                elif gb > ga: 
+                    stats[b]['P'] += 3; stats[b]['V'] += 1; stats[a]['D'] += 1
+                else: 
+                    stats[a]['P'] += 1; stats[b]['P'] += 1; stats[a]['E'] += 1; stats[b]['E'] += 1
         
-        df_tab = pd.DataFrame.from_dict(stats, orient='index').sort_values(by=["P", "V"], ascending=False)
+        for t in stats: stats[t]["SG"] = stats[t]["GP"] - stats[t]["GC"]
+        
+        df_tab = pd.DataFrame.from_dict(stats, orient='index').sort_values(by=["P", "V", "SG"], ascending=False)
         st.table(df_tab)
 
 # --- RANKING ---
 elif aba == "Ranking":
     st.header("💰 Saldo das Apostas")
-    jogos_frescos = buscar_dados()
+    df_nuvem = buscar_dados()
     lucros = {}
-    for j in jogos_frescos:
-        if j['finalizado'] is True:
+    for j in df_nuvem:
+        if j['ga'] is not None and j['gb'] is not None:
             res = "A" if j['ga'] > j['gb'] else "B" if j['ga'] < j['gb'] else "E"
             pote = sum(a['valor'] for a in j['apostas'])
             venc = sum(a['valor'] for a in j['apostas'] if a['opcao'] == res)
@@ -155,5 +157,5 @@ elif aba == "Ranking":
                 else:
                     lucros[a['nome']] -= a['valor']
     if lucros:
-        df_rk = pd.DataFrame([{"Nome": k, "Saldo": money(v)} for k, v in lucros.items()])
-        st.table(df_rk)
+        df_rk = pd.DataFrame([{"Nome": k, "Saldo": money(v), "val": v} for k, v in lucros.items()])
+        st.table(df_rk.sort_values("val", ascending=False).drop(columns="val"))
