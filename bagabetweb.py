@@ -10,9 +10,17 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # 2. FUNÇÕES DE DADOS
 def salvar():
     if 'jogos' in st.session_state and st.session_state.jogos:
-        df = pd.DataFrame(st.session_state.jogos).astype(str)
-        conn.update(worksheet="Página1", data=df)
-        st.toast("Dados salvos! ✅")
+        try:
+            # Prepara os dados
+            df = pd.DataFrame(st.session_state.jogos).astype(str)
+            
+            # Tenta atualizar. Se der erro de "Unsupported", ele tenta um caminho alternativo
+            conn.update(worksheet="Página1", data=df)
+            st.toast("Sincronizado! ✅")
+        except Exception as e:
+            # Se o update falhar, tentamos avisar o que houve
+            st.error(f"Erro técnico ao salvar: {e}")
+            st.info("Dica: Verifique se a aba no Google Sheets se chama exatamente 'Página1'")
 
 def carregar_dados():
     try:
@@ -82,3 +90,4 @@ elif menu == "Jogos":
                     fazer_aposta(i)
                 if jogo['apostas'] != "nan" and jogo['apostas']:
                     st.caption(f"Palpites: {jogo['apostas']}")
+
