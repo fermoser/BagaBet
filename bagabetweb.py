@@ -103,7 +103,7 @@ if menu == "Jogos":
                         l1, l2 = st.columns(2)
                         vga = l1.number_input(f"Gols {j['a']}", 0, 20, key=f"vga{i}")
                         vgb = l2.number_input(f"Gols {j['b']}", 0, 20, key=f"vgb{i}")
-                        if st.button("ENCERRAR JOGO", key=f"btn_f{i}"):
+                        if st.button("FINALIZAR JOGO", key=f"btn_f{i}"):
                             st.session_state.jogos[i].update({'ga': int(vga), 'gb': int(vgb), 'finalizado': True, 'apostas_abertas': False})
                             salvar_tudo(st.session_state.jogos)
                             st.rerun()
@@ -136,32 +136,26 @@ if menu == "Jogos":
                 else:
                     st.info("Nenhuma aposta para este jogo.")
 
-            # EXPANDER: NOVA APOSTA (ADMIN)
+            # EXPANDER: NOVA APOSTA (USANDO FORM PARA LIMPAR)
             if sou_admin and j['apostas_abertas'] and not j['finalizado']:
                 with st.expander("💰 Registrar Nova Aposta"):
-                    # CHAVES ÚNICAS PARA LIMPAR DEPOIS
-                    key_nome = f"input_n{i}"
-                    key_valor = f"input_v{i}"
-                    key_opcao = f"input_o{i}"
-                    
-                    n_ap = st.text_input("Nome do Apostador", key=key_nome)
-                    v_ap = st.number_input("Valor da Aposta (R$)", min_value=1.0, step=1.0, value=10.0, key=key_valor)
-                    o_ap = st.radio("Palpite", [j['a'], "Empate", j['b']], key=key_opcao, horizontal=True)
-                    
-                    if st.button("CONFIRMAR E SALVAR", key=f"btn_ap{i}"):
-                        if n_ap.strip():
-                            cod = "A" if o_ap == j['a'] else "B" if o_ap == j['b'] else "E"
-                            st.session_state.jogos[i]['apostas'].append({"nome": n_ap, "valor": v_ap, "opcao": cod})
-                            salvar_tudo(st.session_state.jogos)
-                            
-                            # LIMPA OS CAMPOS NO SESSION STATE ANTES DE RECARREGAR
-                            st.session_state[key_nome] = ""
-                            st.session_state[key_valor] = 10.0
-                            
-                            st.success(f"Aposta de {n_ap} salva!")
-                            st.rerun()
-                        else:
-                            st.error("Por favor, insira o nome do apostador.")
+                    # O FORMULÁRIO GARANTE A LIMPEZA DOS CAMPOS
+                    with st.form(key=f"form_aposta_{i}", clear_on_submit=True):
+                        n_ap = st.text_input("Nome do Apostador")
+                        v_ap = st.number_input("Valor da Aposta (R$)", min_value=1.0, step=1.0, value=10.0)
+                        o_ap = st.radio("Palpite", [j['a'], "Empate", j['b']], horizontal=True)
+                        
+                        submit = st.form_submit_button("CONFIRMAR E SALVAR")
+                        
+                        if submit:
+                            if n_ap.strip():
+                                cod = "A" if o_ap == j['a'] else "B" if o_ap == j['b'] else "E"
+                                st.session_state.jogos[i]['apostas'].append({"nome": n_ap, "valor": v_ap, "opcao": cod})
+                                salvar_tudo(st.session_state.jogos)
+                                st.success(f"Aposta de {n_ap} salva!")
+                                st.rerun()
+                            else:
+                                st.error("Insira o nome do apostador.")
 
 # --- 2. RANKING GERAL ---
 elif menu == "Ranking Apostas":
@@ -183,13 +177,11 @@ elif menu == "Ranking Apostas":
             saldo = v['ganho'] - v['pago']
             lista_r.append({"Apostador": k, "Total Pago": v['pago'], "Total Ganho": v['ganho'], "Saldo": saldo})
         df_r = pd.DataFrame(lista_r).sort_values("Saldo", ascending=False)
-        # Formatação Visual
         df_r['Total Pago'] = df_r['Total Pago'].apply(money_raw)
         df_r['Total Ganho'] = df_r['Total Ganho'].apply(money_raw)
         df_r['Saldo'] = df_r['Saldo'].apply(money)
         st.write(df_r.to_html(escape=False, index=False), unsafe_allow_html=True)
-    else:
-        st.info("O ranking será gerado assim que houver jogos finalizados.")
+    else: st.info("Finalize jogos para ver o ranking.")
 
 # --- 3. CLASSIFICAÇÃO ---
 elif menu == "Classificação":
@@ -206,12 +198,11 @@ elif menu == "Classificação":
     df_c = pd.DataFrame.from_dict(stats, orient='index').sort_values(["P", "V", "SG"], ascending=False)
     st.table(df_c)
 
-# --- 4. PAINEL ADMIN ---
+# --- 4. PAINEL ADMIN (COM MONITOR E EDITOR) ---
 elif menu == "Painel Admin":
     if sou_admin:
         st.header("⚙️ Painel de Controle")
         
-        # Monitor de Diagnóstico (Movido para cá)
         with st.expander("🔍 Monitor de Sincronização (Diagnóstico)"):
             c1, c2 = st.columns(2)
             c1.write("**Raw do Sheets:**")
@@ -221,10 +212,7 @@ elif menu == "Painel Admin":
             c2.table(diag)
             
         st.divider()
-        
-        # Criador de Torneio Profissional
         st.subheader("🏆 Iniciar Novo Torneio")
-        st.markdown("Preencha a tabela abaixo com os nomes dos times. O sistema gerará todos os confrontos automaticamente.")
         df_editor = pd.DataFrame([{"Time": ""} for _ in range(4)])
         edited_df = st.data_editor(df_editor, num_rows="dynamic", use_container_width=True, key="torneio_editor")
         
@@ -236,9 +224,6 @@ elif menu == "Painel Admin":
                 novos = [{"a": c[0], "b": c[1], "ga": None, "gb": None, "finalizado": False, "apostas_abertas": True, "apostas": []} for c in combs]
                 salvar_tudo(novos)
                 st.session_state.jogos = novos; st.session_state.times = ts
-                st.success("Novo torneio iniciado!")
+                st.success("Torneio criado!")
                 st.rerun()
-            else:
-                st.error("Insira pelo menos 2 times.")
-    else:
-        st.error("Acesso bloqueado. Insira a Chave Admin na barra lateral.")
+    else: st.error("Acesso bloqueado.")
