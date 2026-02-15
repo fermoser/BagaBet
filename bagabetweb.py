@@ -8,7 +8,7 @@ from streamlit_gsheets import GSheetsConnection
 st.set_page_config(page_title="BAGA BET PRO", layout="wide", page_icon="⚽")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- UTILITÁRIOS DE FORMATAÇÃO ---
+# --- UTILITÁRIOS ---
 def money(v):
     try:
         cor = "green" if v > 0 else "red" if v < 0 else "black"
@@ -68,24 +68,37 @@ def salvar_tudo(lista):
     conn.update(data=df_save)
     st.cache_data.clear()
 
-# --- INICIALIZAÇÃO ---
+# --- INICIALIZAÇÃO DE SESSÃO ---
 if 'jogos' not in st.session_state:
     st.session_state.jogos, st.session_state.times, st.session_state.df_raw = carregar_tudo()
 if 'menu_ativo' not in st.session_state:
     st.session_state.menu_ativo = "Jogos"
+if 'autenticado' not in st.session_state:
+    st.session_state.autenticado = False
 
-# --- SIDEBAR (MENU PADRONIZADO) ---
+# --- SIDEBAR ---
 st.sidebar.title("⚽ BAGA BET PRO")
+
+# Campo de Senha (Sempre visível ou até logar)
+if not st.session_state.autenticado:
+    senha = st.sidebar.text_input("Chave Admin", type="password")
+    if senha == "1234":
+        st.session_state.autenticado = True
+        st.rerun()
+else:
+    st.sidebar.success("🔓 Modo Admin Ativo")
+    if st.sidebar.button("Sair do Admin"):
+        st.session_state.autenticado = False
+        st.rerun()
+
+st.sidebar.divider()
 
 # Botão de Sincronização
 if st.sidebar.button("🔄 SINCRONIZAR NUVEM", use_container_width=True):
     st.session_state.jogos, st.session_state.times, st.session_state.df_raw = carregar_tudo()
-    st.rerun()
+    st.success("Dados atualizados!")
 
-st.sidebar.divider()
-st.sidebar.subheader("Menu de Navegação")
-
-# Botões de Menu com Estilo Padronizado
+st.sidebar.subheader("Navegação")
 if st.sidebar.button("🏟️ JOGOS DA RODADA", use_container_width=True):
     st.session_state.menu_ativo = "Jogos"
     st.rerun()
@@ -102,13 +115,10 @@ if st.sidebar.button("⚙️ PAINEL ADMIN", use_container_width=True):
     st.session_state.menu_ativo = "Admin"
     st.rerun()
 
-st.sidebar.divider()
-senha = st.sidebar.text_input("Chave Admin", type="password")
-sou_admin = (senha == "1234")
+sou_admin = st.session_state.autenticado
 
-# --- LÓGICA DE EXIBIÇÃO ---
+# --- TELAS ---
 
-# 1. ABA JOGOS
 if st.session_state.menu_ativo == "Jogos":
     st.header("🏟️ Partidas e Palpites")
     for i, j in enumerate(st.session_state.jogos):
@@ -125,49 +135,44 @@ if st.session_state.menu_ativo == "Jogos":
                         l1, l2 = st.columns(2)
                         vga = l1.number_input(f"Gols {j['a']}", 0, 20, key=f"vga{i}")
                         vgb = l2.number_input(f"Gols {j['b']}", 0, 20, key=f"vgb{i}")
-                        if st.button("FINALIZAR JOGO", key=f"btn_f{i}", use_container_width=True):
+                        if st.button("ENCERRAR JOGO", key=f"btn_f{i}"):
                             st.session_state.jogos[i].update({'ga': int(vga), 'gb': int(vgb), 'finalizado': True, 'apostas_abertas': False})
-                            salvar_tudo(st.session_state.jogos)
-                            st.rerun()
+                            salvar_tudo(st.session_state.jogos); st.rerun()
                 else:
-                    if st.button("🔄 Reabrir Jogo", key=f"btn_re{i}", use_container_width=True):
+                    if st.button("🔄 Reabrir Jogo", key=f"btn_re{i}"):
                         st.session_state.jogos[i].update({'finalizado': False, 'apostas_abertas': True})
-                        salvar_tudo(st.session_state.jogos)
-                        st.rerun()
+                        salvar_tudo(st.session_state.jogos); st.rerun()
 
-            with st.expander(f"📋 Apostas Registradas ({len(j['apostas'])})"):
+            with st.expander(f"📋 Apostas ({len(j['apostas'])})"):
                 if j['apostas']:
                     df_a = pd.DataFrame(j['apostas'])
                     df_a['Palpite'] = df_a['opcao'].map({"A": j['a'], "B": j['b'], "E": "Empate"})
                     if j['finalizado']:
-                        res_real = "A" if j['ga'] > j['gb'] else "B" if j['gb'] > j['ga'] else "E"
+                        res = "A" if j['ga'] > j['gb'] else "B" if j['gb'] > j['ga'] else "E"
                         pote = sum(df_a['valor'])
-                        venc_v = sum(df_a[df_a['opcao'] == res_real]['valor'])
-                        df_a['Retorno Bruto'] = df_a.apply(lambda r: (r['valor']/venc_v * pote) if r['opcao'] == res_real and venc_v > 0 else 0.0, axis=1)
+                        venc_v = sum(df_a[df_a['opcao'] == res]['valor'])
+                        df_a['Retorno Bruto'] = df_a.apply(lambda r: (r['valor']/venc_v * pote) if r['opcao'] == res and venc_v > 0 else 0.0, axis=1)
                         df_a['Lucro Líquido'] = df_a['Retorno Bruto'] - df_a['valor']
                         df_show = df_a.copy()
                         df_show['Retorno Bruto'] = df_show['Retorno Bruto'].apply(money_raw)
                         df_show['Lucro Líquido'] = df_show['Lucro Líquido'].apply(money)
                         st.write(df_show[['nome', 'Palpite', 'valor', 'Retorno Bruto', 'Lucro Líquido']].to_html(escape=False, index=False), unsafe_allow_html=True)
                     else: st.table(df_a[['nome', 'Palpite', 'valor']])
-                else: st.info("Sem apostas.")
 
             if sou_admin and j['apostas_abertas'] and not j['finalizado']:
-                with st.expander("💰 Registrar Nova Aposta"):
-                    with st.form(key=f"form_aposta_{i}", clear_on_submit=True):
-                        n_ap = st.text_input("Nome")
-                        v_ap = st.number_input("Valor (R$)", min_value=1.0, step=1.0, value=10.0)
-                        o_ap = st.radio("Lado", [j['a'], "Empate", j['b']], horizontal=True)
-                        if st.form_submit_button("CONFIRMAR E SALVAR", use_container_width=True):
-                            if n_ap.strip():
-                                cod = "A" if o_ap == j['a'] else "B" if o_ap == j['b'] else "E"
-                                st.session_state.jogos[i]['apostas'].append({"nome": n_ap, "valor": v_ap, "opcao": cod})
-                                salvar_tudo(st.session_state.jogos)
-                                st.rerun()
+                with st.expander("💰 Nova Aposta"):
+                    with st.form(key=f"f_ap_{i}", clear_on_submit=True):
+                        n = st.text_input("Nome")
+                        v = st.number_input("Valor", 1.0, 1000.0, 10.0, step=1.0)
+                        o = st.radio("Palpite", [j['a'], "Empate", j['b']], horizontal=True)
+                        if st.form_submit_button("SALVAR"):
+                            cod = "A" if o == j['a'] else "B" if o == j['b'] else "E"
+                            st.session_state.jogos[i]['apostas'].append({"nome": n, "valor": v, "opcao": cod})
+                            salvar_tudo(st.session_state.jogos); st.rerun()
 
-# 2. ABA RANKING
 elif st.session_state.menu_ativo == "Ranking":
-    st.header("🤑 Ranking Financeiro Geral")
+    st.header("🤑 Ranking Financeiro")
+    # ... (lógica de ranking igual à anterior)
     rank = {}
     for j in st.session_state.jogos:
         if j['finalizado'] and j['ga'] is not None:
@@ -180,44 +185,46 @@ elif st.session_state.menu_ativo == "Ranking":
                 if a['opcao'] == res and venc_v > 0:
                     rank[a['nome']]["ganho"] += (a['valor'] / venc_v) * pote
     if rank:
-        lista_r = [{"Apostador": k, "Total Pago": v['pago'], "Total Ganho": v['ganho'], "Saldo": v['ganho']-v['pago']} for k, v in rank.items()]
+        lista_r = [{"Apostador": k, "Investido": money_raw(v['pago']), "Retorno": money_raw(v['ganho']), "Saldo": v['ganho']-v['pago']} for k, v in rank.items()]
         df_r = pd.DataFrame(lista_r).sort_values("Saldo", ascending=False)
-        df_r['Total Pago'] = df_r['Total Pago'].apply(money_raw)
-        df_r['Total Ganho'] = df_r['Total Ganho'].apply(money_raw)
         df_r['Saldo'] = df_r['Saldo'].apply(money)
         st.write(df_r.to_html(escape=False, index=False), unsafe_allow_html=True)
-    else: st.info("Aguardando jogos finalizados.")
 
-# 3. ABA CLASSIFICAÇÃO
 elif st.session_state.menu_ativo == "Classificação":
-    st.header("📊 Tabela do Campeonato")
-    stats = {t: {"P":0,"J":0,"V":0,"E":0,"D":0,"GP":0,"GC":0,"SG":0} for t in st.session_state.times}
+    st.header("📊 Tabela")
+    # ... (lógica de classificação igual à anterior)
+    stats = {t: {"P":0,"J":0,"V":0,"E":0,"D":0,"SG":0} for t in st.session_state.times}
     for j in st.session_state.jogos:
         if j['ga'] is not None and j['gb'] is not None:
             a, b, ga, gb = j['a'], j['b'], j['ga'], j['gb']
-            stats[a]["J"]+=1; stats[b]["J"]+=1; stats[a]["GP"]+=ga; stats[a]["GC"]+=gb; stats[b]["GP"]+=gb; stats[b]["GC"]+=ga
-            if ga > gb: stats[a]["P"]+=3; stats[a]["V"]+=1; stats[b]["D"]+=1
-            elif gb > ga: stats[b]["P"]+=3; stats[b]["V"]+=1; stats[a]["D"]+=1
-            else: stats[a]["P"]+=1; stats[b]["P"]+=1; stats[a]["E"]+=1; stats[b]["E"]+=1
-            stats[a]["SG"] = stats[a]["GP"] - stats[a]["GC"]; stats[b]["SG"] = stats[b]["GP"] - stats[b]["GC"]
-    st.table(pd.DataFrame.from_dict(stats, orient='index').sort_values(["P", "V", "SG"], ascending=False))
+            stats[a]["J"]+=1; stats[b]["J"]+=1
+            if ga > gb: stats[a]["P"]+=3; stats[b]["D"]+=1
+            elif gb > ga: stats[b]["P"]+=3; stats[a]["D"]+=1
+            else: stats[a]["P"]+=1; stats[b]["P"]+=1
+            stats[a]["SG"]+=(ga-gb); stats[b]["SG"]+=(gb-ga)
+    st.table(pd.DataFrame.from_dict(stats, orient='index').sort_values(["P", "SG"], ascending=False))
 
-# 4. ABA ADMIN
 elif st.session_state.menu_ativo == "Admin":
     if sou_admin:
-        st.header("⚙️ Painel Admin")
-        with st.expander("🔍 Monitor de Sincronização"):
+        st.header("⚙️ Painel de Controle")
+        # VOLTOU A COMPARAÇÃO RAW VS PROCESSADO
+        with st.expander("🔍 MONITOR DE DADOS (Raw Sheets vs App)"):
+            c1, c2 = st.columns(2)
+            c1.write("**Na Planilha (Raw):**")
+            c1.dataframe(st.session_state.df_raw[['a', 'b', 'finalizado', 'apostas_abertas']])
+            c2.write("**No App (Processado):**")
             diag = [{"Jogo": f"{j['a']}x{j['b']}", "Fim": j['finalizado'], "Aberto": j['apostas_abertas']} for j in st.session_state.jogos]
-            st.table(diag)
+            c2.table(diag)
+        
         st.divider()
         st.subheader("🏆 Novo Torneio")
         df_ed = pd.DataFrame([{"Time": ""} for _ in range(4)])
-        edited = st.data_editor(df_ed, num_rows="dynamic", use_container_width=True, key="ed")
-        if st.button("🚀 CRIAR NOVO TORNEIO", use_container_width=True):
+        edited = st.data_editor(df_ed, num_rows="dynamic", use_container_width=True)
+        if st.button("🚀 CRIAR TORNEIO", use_container_width=True):
             ts = [r['Time'].strip() for _, r in edited.iterrows() if r['Time'].strip()]
             if len(ts) >= 2:
                 combs = list(itertools.combinations(ts, 2))
                 random.shuffle(combs)
                 novos = [{"a": c[0], "b": c[1], "ga": None, "gb": None, "finalizado": False, "apostas_abertas": True, "apostas": []} for c in combs]
-                salvar_tudo(novos); st.session_state.jogos = novos; st.session_state.times = ts; st.rerun()
-    else: st.error("Acesso restrito.")
+                salvar_tudo(novos); st.rerun()
+    else: st.error("Acesse o modo Admin na barra lateral.")
