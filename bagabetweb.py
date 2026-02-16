@@ -8,7 +8,7 @@ from datetime import datetime
 st.set_page_config(page_title="BAGA GESTOR PRO", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Nome das abas exatamente como estão no seu Google Sheets
+# Nomes das abas (Conforme sua planilha)
 ABA_JOGOS = "Página1" 
 ABA_HISTORICO = "Historico"
 
@@ -67,7 +67,6 @@ if st.session_state.torneio_ativo is None:
     
     with st.expander("📜 Hall da Fama (Campeões Anteriores)"):
         if not df_hist.empty:
-            # Mostra o histórico do mais recente para o mais antigo
             st.dataframe(df_hist.sort_index(ascending=False), use_container_width=True)
         else:
             st.info("Nenhum torneio finalizado no histórico ainda.")
@@ -100,6 +99,7 @@ else:
         is_admin = (st.text_input("Senha Admin", type="password") == "1234")
         if st.button("🏠 Sair"): st.session_state.torneio_ativo = None; st.rerun()
 
+    # --- ABA JOGOS ---
     if menu == "🏟️ Jogos":
         for f in df_t['fase'].unique():
             st.subheader(f"📍 {f}")
@@ -123,6 +123,7 @@ else:
                                 if st.form_submit_button("Salvar"):
                                     df_db.loc[idx,['gols_a','gols_b','pen_a','pen_b','finalizado']] = [ga, gb, pa, pb, "SIM"]; salvar_dados(df_db, ABA_JOGOS)
 
+    # --- ABA CLASSIFICAÇÃO / CHAVEAMENTO ---
     elif menu == "📊 Classificação/Chave":
         if fmt == "LIGA":
             st.subheader("📈 Tabela de Classificação")
@@ -140,14 +141,29 @@ else:
             df_tab = pd.DataFrame.from_dict(stats, orient='index').sort_values(by=['P','V','SG','GP'], ascending=False)
             st.table(df_tab)
         else:
-            st.info("Chaveamento visual disponível na aba Jogos.")
+            # VOLTA DO CHAVEAMENTO VISUAL
+            st.subheader("🗺️ Chaveamento")
+            f_map = {"Oitavas":0, "Quartas":1, "Semifinal":2, "3º Lugar":3, "Final":4}
+            f_p = sorted([f for f in df_t['fase'].unique() if f in f_map], key=lambda x: f_map.get(x, 99))
+            cols = st.columns(len(f_p))
+            for i, fase in enumerate(f_p):
+                with cols[i]:
+                    st.markdown(f"<div style='text-align:center; background:#444; color:white; border-radius:10px; padding:5px; margin-bottom:15px;'>{fase.upper()}</div>", unsafe_allow_html=True)
+                    for _, r in df_t[df_t['fase'] == fase].iterrows():
+                        done = is_done(r['finalizado'])
+                        v, _ = obter_vencedor(r)
+                        sc = f"{r['gols_a']} x {r['gols_b']}" if r['modo_copa'] == "Só Ida" else f"{r['ida_a']+r['volta_a']} x {r['ida_b']+r['volta_b']}"
+                        if done and (int(r['pen_a'])+int(r['pen_b']) > 0): sc += f" <br><small>(P: {r['pen_a']}x{r['pen_b']})</small>"
+                        b_c = "#4CAF50" if done else "#ccc"
+                        st.markdown(f"""<div style="border: 2px solid {b_c}; background: white; border-radius: 20px; padding: 10px; margin-bottom: 20px; text-align: center; color:black;"><div style="font-size: 11px; font-weight: bold; color: #777;">{r['a']} x {r['b']}</div><div style="font-size: 20px; font-weight: 900; margin: 5px 0;">{sc}</div><div style="border-top: 1px solid #eee; padding-top: 5px; font-size: 10px;">Vencedor: <b>{v}</b></div></div>""", unsafe_allow_html=True)
 
+    # --- ABA ADMIN ---
     elif menu == "⚙️ Admin":
         if is_admin:
             st.subheader("🏁 Finalizar e Imortalizar Torneio")
-            st.info("Esta ação calcula o pódio e salva na aba Historico.")
+            st.info("Esta ação salva o pódio no Histórico sem apagar os jogos.")
             
-            if st.button("🏆 SALVAR NO HISTÓRICO E ENCERRAR"):
+            if st.button("🏆 SALVAR NO HISTÓRICO"):
                 try:
                     camp, vice, terc = "", "", ""
                     if fmt == "LIGA":
@@ -170,30 +186,20 @@ else:
                         if not t3d.empty: terc, _ = obter_vencedor(t3d.iloc[0])
 
                     nova_linha = pd.DataFrame([{
-                        'torneio_id': tid,
-                        'formato': fmt,
-                        'campeao': camp,
-                        'vice': vice,
-                        'terceiro': terc,
+                        'torneio_id': tid, 'formato': fmt, 'campeao': camp, 'vice': vice, 'terceiro': terc,
                         'data_fim': datetime.now().strftime("%d/%m/%Y %H:%M")
                     }])
                     
                     df_hist_novo = pd.concat([df_hist, nova_linha], ignore_index=True)
                     conn.update(worksheet=ABA_HISTORICO, data=df_hist_novo)
-                    
-                    # Limpa os jogos da aba principal
-                    df_db_limpo = df_db[df_db['torneio_id'] != tid]
-                    salvar_dados(df_db_limpo, ABA_JOGOS)
-                    
-                    st.success("Torneio arquivado com sucesso!")
+                    st.success("Copiado para o Histórico com sucesso!")
                     st.balloons()
-                    st.session_state.torneio_ativo = None
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro: {e}")
 
             st.divider()
-            if st.button("🚨 EXCLUIR SEM SALVAR"):
+            if st.button("🚨 EXCLUIR TORNEIO (CUIDADO)"):
                 salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                 st.session_state.torneio_ativo = None
                 st.rerun()
