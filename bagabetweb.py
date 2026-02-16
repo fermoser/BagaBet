@@ -39,7 +39,6 @@ def obter_vencedor(r):
         sa, sb = r['gols_a'], r['gols_b']
     else:
         sa, sb = r['ida_a'] + r['volta_a'], r['ida_b'] + r['volta_b']
-    
     if sa > sb: return r['a'], r['b']
     if sb > sa: return r['b'], r['a']
     return (r['a'], r['b']) if r['pen_a'] > r['pen_b'] else (r['b'], r['a'])
@@ -74,6 +73,7 @@ else:
         is_admin = (st.text_input("Senha Admin", type="password") == "1234")
         if st.button("🏠 Sair"): st.session_state.clear(); st.rerun()
 
+    # --- ADMIN ---
     if menu == "⚙️ Admin":
         if is_admin:
             with st.expander("🚀 Iniciar Torneio"):
@@ -92,8 +92,8 @@ else:
                                 novos.append({'torneio_id': tid, 'formato': 'COPA', 'fase': fase_nome, 'a': lista[i], 'b': lista[i+1], 'finalizado': '0', 'modo_copa': modo_atual})
                     salvar_dados(pd.concat([df_db, pd.DataFrame(novos)], ignore_index=True))
             if st.button("🚨 EXCLUIR TORNEIO"): salvar_dados(df_db[df_db['torneio_id'].astype(str) != str(tid)])
-        else: st.warning("Acesso restrito.")
 
+    # --- JOGOS ---
     elif menu == "🏟️ Jogos":
         if df_t.empty: st.info("Sem jogos.")
         else:
@@ -116,42 +116,35 @@ else:
                             proxs.append({'torneio_id': tid, 'formato': 'COPA', 'fase': nova, 'a': vencs[i], 'b': vencs[i+1], 'finalizado': '0', 'modo_copa': modo_atual})
                     salvar_dados(pd.concat([df_db, pd.DataFrame(proxs)], ignore_index=True))
 
-            fases_ordem = sorted(df_t['fase'].unique(), key=lambda x: 1 if x == "Final" else 0)
+            fases_ordem = sorted(df_t['fase'].unique(), key=lambda x: 2 if x == "Final" else 1 if x == "3º Lugar" else 0)
             for fase in fases_ordem:
                 st.subheader(f"📍 {fase}")
                 for idx, row in df_t[df_t['fase'] == fase].iterrows():
                     with st.container(border=True):
                         c1, c2, c3 = st.columns([2,1,2])
-                        if fmt == "LIGA" or row['modo_copa'] == "Só Ida" or row['fase'] in ["Final", "3º Lugar"]:
-                            pl = f"{row['gols_a']} x {row['gols_b']}"
-                        else:
-                            pl = f"({row['ida_a']}) {row['volta_a']} x {row['volta_b']} ({row['ida_b']})"
-                        if is_done(row['finalizado']) and row['pen_a'] + row['pen_b'] > 0:
-                            pl += f" (P: {row['pen_a']}x{row['pen_b']})"
-                        c1.markdown(f"<p style='text-align:right; font-size:18px;'><b>{row['a']}</b></p>", unsafe_allow_html=True)
-                        c2.markdown(f"<div style='text-align:center; background:#eee; font-weight:bold; padding:5px; border-radius:5px;'>{pl}</div>", unsafe_allow_html=True)
-                        c3.markdown(f"<p style='text-align:left; font-size:18px;'><b>{row['b']}</b></p>", unsafe_allow_html=True)
+                        txt_pl = f"{row['gols_a']} x {row['gols_b']}" if (row['modo_copa'] == "Só Ida" or row['fase'] in ["Final", "3º Lugar"]) else f"({row['ida_a']}) {row['volta_a']} x {row['volta_b']} ({row['ida_b']})"
+                        if is_done(row['finalizado']) and row['pen_a'] + row['pen_b'] > 0: txt_pl += f" (P: {row['pen_a']}x{row['pen_b']})"
+                        c1.markdown(f"<p style='text-align:right'><b>{row['a']}</b></p>", unsafe_allow_html=True)
+                        c2.markdown(f"<div style='text-align:center; background:#eee; border-radius:5px;'>{txt_pl}</div>", unsafe_allow_html=True)
+                        c3.markdown(f"<p style='text-align:left'><b>{row['b']}</b></p>", unsafe_allow_html=True)
 
                         if is_admin:
                             if fmt == "LIGA" or row['modo_copa'] == "Só Ida" or row['fase'] in ["Final", "3º Lugar"]:
                                 with st.expander("✎ Lançar Placar"):
                                     ca, cb = st.columns(2)
-                                    ga = ca.number_input(f"Gols {row['a']}", 0, 99, int(row['gols_a']), key=f"ga_{idx}")
-                                    gb = cb.number_input(f"Gols {row['b']}", 0, 99, int(row['gols_b']), key=f"gb_{idx}")
+                                    ga, gb = ca.number_input(f"Gols {row['a']}", 0, 99, int(row['gols_a']), key=f"ga_{idx}"), cb.number_input(f"Gols {row['b']}", 0, 99, int(row['gols_b']), key=f"gb_{idx}")
                                     pa, pb = 0, 0
                                     if ga == gb and fmt == "COPA":
                                         st.warning("Pênaltis:")
                                         cpa, cpb = st.columns(2)
                                         pa, pb = cpa.number_input("Pên A", 0, 99, int(row['pen_a']), key=f"pa_{idx}"), cpb.number_input("Pên B", 0, 99, int(row['pen_b']), key=f"pb_{idx}")
-                                    if st.button("Confirmar Resultado", key=f"btn_{idx}"):
+                                    if st.button("Confirmar", key=f"btn_{idx}"):
                                         df_db.loc[idx, ['gols_a','gols_b','pen_a','pen_b','finalizado']] = [ga, gb, pa, pb, "SIM"]; salvar_dados(df_db)
                             else:
-                                exp_ida = st.expander("🏟️ Jogo de Ida")
-                                with exp_ida:
+                                with st.expander("🏟️ Jogo de Ida"):
                                     ci1, ci2 = st.columns(2)
                                     i1, i2 = ci1.number_input(f"{row['a']} ", 0, 99, int(row['ida_a']), key=f"i1_{idx}"), ci2.number_input(f"{row['b']} ", 0, 99, int(row['ida_b']), key=f"i2_{idx}")
-                                exp_volta = st.expander("🏟️ Jogo de Volta")
-                                with exp_volta:
+                                with st.expander("🏟️ Jogo de Volta"):
                                     cv1, cv2 = st.columns(2)
                                     v1, v2 = cv1.number_input(f"{row['a']}  ", 0, 99, int(row['volta_a']), key=f"v1_{idx}"), cv2.number_input(f"{row['b']}  ", 0, 99, int(row['volta_b']), key=f"v2_{idx}")
                                     pa, pb = 0, 0
@@ -162,8 +155,10 @@ else:
                                 if st.button("Salvar Agregado", key=f"btn_{idx}"):
                                     df_db.loc[idx, ['ida_a','ida_b','volta_a','volta_b','pen_a','pen_b','finalizado']] = [i1, i2, v1, v2, pa, pb, "SIM"]; salvar_dados(df_db)
 
+    # --- CHAVEAMENTO GRÁFICO ---
     elif menu == "📊 Chaveamento & Pódio":
         if fmt == "LIGA":
+            # Lógica de Liga (Tabela)
             times = pd.concat([df_t['a'], df_t['b']]).unique()
             stats = {t: {'P':0, 'J':0, 'V':0, 'SG':0} for t in times if pd.notna(t)}
             for _, r in df_t[df_t['finalizado'] == 'SIM'].iterrows():
@@ -176,30 +171,59 @@ else:
             st.table(pd.DataFrame.from_dict(stats, orient='index').sort_values(by=['P','V','SG'], ascending=False))
         else:
             st.subheader("🗺️ Chaveamento")
-            fases_disponiveis = [f for f in df_t['fase'].unique() if f]
-            if fases_disponiveis:
-                fases_sorted = sorted(fases_disponiveis, key=lambda x: 1 if x == "3º Lugar" else 2 if x == "Final" else 0)
-                cols_chave = st.columns(len(fases_sorted))
-                for i, fase in enumerate(fases_sorted):
-                    with cols_chave[i]:
-                        st.markdown(f"<div style='text-align:center; background:#333; color:white; border-radius:5px; padding:2px;'><b>{fase.upper()}</b></div>", unsafe_allow_html=True)
-                        for _, r in df_t[df_t['fase'] == fase].iterrows():
-                            done = is_done(r['finalizado'])
-                            txt = f"{r['gols_a']} x {r['gols_b']}" if (r['modo_copa'] == "Só Ida" or r['fase'] in ["Final", "3º Lugar"]) else f"({r['ida_a']}) {r['volta_a']} x {r['volta_b']} ({r['ida_b']})"
-                            if done and (r['pen_a'] > 0 or r['pen_b'] > 0): txt += f"<br><small>P: {r['pen_a']}x{r['pen_b']}</small>"
-                            v, _ = obter_vencedor(r)
-                            cor = "#4CAF50" if done else "#ccc"
-                            st.markdown(f"""<div style="border-top: 4px solid {cor}; background:#f9f9f9; padding:10px; border-radius:5px; margin-top:10px; color:black; text-align:center;"><div style="font-size:12px; margin-bottom:5px;">{r['a']} <b>x</b> {r['b']}</div><div style="font-size:16px; font-weight:bold; background:#eee; border-radius:3px;">{txt}</div><hr style='margin:8px 0;'><div style="font-size:11px;">Vencedor: <b>{v}</b></div></div>""", unsafe_allow_html=True)
+            # Ordenar fases: Quartas -> Semi -> 3º Lugar -> Final
+            fases_raw = df_t['fase'].unique()
+            ordem_map = {"Oitavas":0, "Quartas":1, "Semifinal":2, "3º Lugar":3, "Final":4}
+            fases_sorted = sorted(fases_raw, key=lambda x: ordem_map.get(x, 99))
             
+            cols = st.columns(len(fases_sorted))
+            
+            for i, fase in enumerate(fases_sorted):
+                with cols[i]:
+                    st.markdown(f"<div style='text-align:center; margin-bottom:20px; color:#555;'><b>{fase.upper()}</b></div>", unsafe_allow_html=True)
+                    for _, r in df_t[df_t['fase'] == fase].iterrows():
+                        done = is_done(r['finalizado'])
+                        placar = f"{r['gols_a']} x {r['gols_b']}" if (r['modo_copa'] == "Só Ida" or r['fase'] in ["Final", "3º Lugar"]) else f"{r['ida_a']}+{r['volta_a']} x {r['ida_b']}+{r['volta_b']}"
+                        if done and (r['pen_a'] + r['pen_b'] > 0): placar += f" <br>(P: {r['pen_a']}x{r['pen_b']})"
+                        v, _ = obter_vencedor(r)
+                        
+                        # Estilo do Balão (Card)
+                        bg_color = "#ffffff"
+                        border_color = "#4CAF50" if done else "#ddd"
+                        text_color = "#333"
+                        
+                        st.markdown(f"""
+                        <div style="
+                            background-color: {bg_color};
+                            border: 2px solid {border_color};
+                            border-radius: 15px;
+                            padding: 12px;
+                            margin-bottom: 15px;
+                            text-align: center;
+                            box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+                            color: {text_color};
+                        ">
+                            <div style="font-size: 13px; font-weight: bold; border-bottom: 1px solid #eee; padding-bottom: 5px;">
+                                {r['a']} <span style='color:#999'>vs</span> {r['b']}
+                            </div>
+                            <div style="font-size: 18px; font-weight: 800; padding: 10px 0;">{placar}</div>
+                            <div style="font-size: 10px; color: #666; font-style: italic;">
+                                Vencedor: <b style='color:#333'>{v}</b>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+            # PÓDIO FINAL
             final = df_t[df_t['fase'] == 'Final']
             if not final.empty and is_done(final.iloc[0]['finalizado']):
                 st.divider()
+                st.header("🏆 Pódio Final")
                 camp, vice = obter_vencedor(final.iloc[0])
                 st.balloons()
-                col1, col2, col3 = st.columns(3)
-                col1.success(f"🥇 **CAMPEÃO**\n\n{camp}")
-                col2.info(f"🥈 **VICE**\n\n{vice}")
+                c1, c2, c3 = st.columns(3)
+                c1.markdown(f"<div style='text-align:center; padding:20px; background:#d4edda; border-radius:15px; border:2px solid #28a745;'>🥇 <b>CAMPEÃO</b><br><span style='font-size:24px'>{camp}</span></div>", unsafe_allow_html=True)
+                c2.markdown(f"<div style='text-align:center; padding:20px; background:#d1ecf1; border-radius:15px; border:2px solid #17a2b8;'>🥈 <b>VICE</b><br><span style='font-size:20px'>{vice}</span></div>", unsafe_allow_html=True)
                 t3_data = df_t[df_t['fase'] == '3º Lugar']
                 if not t3_data.empty and is_done(t3_data.iloc[0]['finalizado']):
-                    terc, _ = obter_vencedor(t3_data.iloc[0])
-                    col3.warning(f"🥉 **3º LUGAR**\n\n{terc}")
+                    t3, _ = obter_vencedor(t3_data.iloc[0])
+                    c3.markdown(f"<div style='text-align:center; padding:20px; background:#fff3cd; border-radius:15px; border:2px solid #ffc107;'>🥉 <b>3º LUGAR</b><br><span style='font-size:18px'>{t3}</span></div>", unsafe_allow_html=True)
