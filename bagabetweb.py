@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd
+import pd
 from itertools import combinations
 from streamlit_gsheets import GSheetsConnection
 from datetime import datetime, timedelta
@@ -21,38 +21,55 @@ COLUNAS = [
 def carregar_dados(aba):
     try:
         df = conn.read(worksheet=aba, ttl=0)
+        
+        # Se a aba estiver totalmente vazia ou der erro na leitura
         if df is None or df.empty:
             if aba == ABA_JOGOS: return pd.DataFrame(columns=COLUNAS)
             return pd.DataFrame(columns=['torneio_id','formato','campeao','vice','terceiro','data_fim'])
         
+        # Limpeza de colunas fantasmas (Unnamed)
+        df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+
         if aba == ABA_JOGOS:
+            # BLINDAGEM CONTRA KEYERROR: Garante que todas as colunas existam
             for c in COLUNAS:
-                if c not in df.columns: df[c] = None
-            df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+                if c not in df.columns:
+                    df[c] = None
+            
+            # Garante que valores numéricos sejam números mesmo
             cols_n = ['gols_a', 'gols_b', 'ida_a', 'ida_b', 'volta_a', 'volta_b', 'pen_a', 'pen_b']
             for col in cols_n:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+        
         return df
-    except:
-        return pd.DataFrame()
+    except Exception as e:
+        # Se der erro crítico, retorna um DataFrame vazio com as colunas certas para não travar a linha 110
+        if aba == ABA_JOGOS: return pd.DataFrame(columns=COLUNAS)
+        return pd.DataFrame(columns=['torneio_id','formato','campeao','vice','terceiro','data_fim'])
 
 def salvar_dados(df, aba):
-    conn.update(worksheet=aba, data=df.copy())
-    st.cache_data.clear()
-    st.rerun()
+    try:
+        conn.update(worksheet=aba, data=df.copy())
+        st.cache_data.clear()
+        st.rerun()
+    except:
+        st.error("Erro ao conectar com o Google Sheets. Aguarde 5 segundos e tente novamente.")
 
 def is_done(val):
     return str(val).upper().strip() in ["1", "SIM", "TRUE"]
 
 def obter_vencedor(r):
-    if not is_done(r['finalizado']): return "---", ""
-    if r['fase'] in ["Final", "3º Lugar"] or r['modo_copa'] == "Só Ida":
-        sa, sb = int(r['gols_a']), int(r['gols_b'])
-    else:
-        sa, sb = int(r['ida_a']) + int(r['volta_a']), int(r['ida_b']) + int(r['volta_b'])
-    if sa > sb: return r['a'], r['b']
-    if sb > sa: return r['b'], r['a']
-    return (r['a'], r['b']) if int(r['pen_a']) > int(r['pen_b']) else (r['b'], r['a'])
+    try:
+        if not is_done(r['finalizado']): return "---", ""
+        if r['fase'] in ["Final", "3º Lugar"] or r['modo_copa'] == "Só Ida":
+            sa, sb = int(r['gols_a']), int(r['gols_b'])
+        else:
+            sa, sb = int(r['ida_a']) + int(r['volta_a']), int(r['ida_b']) + int(r['volta_b'])
+        if sa > sb: return r['a'], r['b']
+        if sb > sa: return r['b'], r['a']
+        return (r['a'], r['b']) if int(r['pen_a']) > int(r['pen_b']) else (r['b'], r['a'])
+    except:
+        return "---", ""
 
 # --- INICIALIZAÇÃO ---
 if 'torneio_ativo' not in st.session_state:
@@ -65,40 +82,35 @@ df_hist = carregar_dados(ABA_HISTORICO)
 if st.session_state.torneio_ativo is None:
     st.title("⚽ BAGA GESTOR")
     
-    # 1. Hall da Fama
     with st.expander("📜 Hall da Fama (Campeões Anteriores)"):
         if not df_hist.empty:
             st.dataframe(df_hist.sort_index(ascending=False), use_container_width=True)
         else:
             st.info("Nenhum torneio finalizado no histórico ainda.")
 
-    # 2. Torneios para Carregar (Minimizado por padrão)
-    torneios = df_db.dropna(subset=['torneio_id'])['torneio_id'].unique() if not df_db.empty else []
-    if len(torneios) > 0:
-        with st.expander("📂 Carregar Torneio em Aberto", expanded=False):
-            cols = st.columns(3)
-            for i, t_nome in enumerate(torneios):
-                fmt_t = df_db[df_db['torneio_id'] == t_nome]['formato'].iloc[0]
-                if cols[i%3].button(f"🏆 {t_nome} ({fmt_t})", key=f"btn_{t_nome}"):
-                    st.session_state.torneio_ativo = t_nome
-                    st.session_state.formato = fmt_t
-                    st.rerun()
+    # Filtro extra para garantir que não tente ler torneio_id se df_db falhou
+    if not df_db.empty and 'torneio_id' in df_db.columns:
+        torneios = df_db.dropna(subset=['torneio_id'])['torneio_id'].unique()
+        if len(torneios) > 0:
+            with st.expander("📂 Carregar Torneio em Aberto", expanded=False):
+                cols = st.columns(3)
+                for i, t_nome in enumerate(torneios):
+                    try:
+                        fmt_t = df_db[df_db['torneio_id'] == t_nome]['formato'].iloc[0]
+                        if cols[i%3].button(f"🏆 {t_nome} ({fmt_t})", key=f"btn_{t_nome}"):
+                            st.session_state.torneio_ativo = t_nome
+                            st.session_state.formato = fmt_t
+                            st.rerun()
+                    except:
+                        continue
     
     st.divider()
-    
-    # 3. Novo Torneio (Lógica de Modo Ida e Volta dinâmica)
     st.subheader("🆕 Novo Torneio")
     with st.form("criar"):
         c1, c2 = st.columns(2)
         n = c1.text_input("Nome do Torneio")
         t = c2.selectbox("Tipo", ["COPA", "LIGA"])
-        
-        # Só mostra opção de Ida e Volta se for COPA
-        if t == "COPA":
-            m = st.selectbox("Modo", ["Só Ida", "Ida e Volta"])
-        else:
-            m = "Só Ida" # Liga é sempre ida (pontos corridos)
-            st.caption("ℹ️ Ligas são criadas automaticamente no modo 'Só Ida'.")
+        m = st.selectbox("Modo", ["Só Ida", "Ida e Volta"]) if t == "COPA" else "Só Ida"
             
         if st.form_submit_button("CRIAR"):
             if n: 
@@ -106,8 +118,13 @@ if st.session_state.torneio_ativo is None:
                 st.rerun()
 
 else:
+    # AQUI ESTAVA O ERRO (Linha 110 antiga): Adicionada verificação de segurança
     tid, fmt = st.session_state.torneio_ativo, st.session_state.formato
-    df_t = df_db[df_db['torneio_id'].astype(str) == str(tid)].copy()
+    
+    if 'torneio_id' in df_db.columns:
+        df_t = df_db[df_db['torneio_id'].astype(str) == str(tid)].copy()
+    else:
+        df_t = pd.DataFrame(columns=COLUNAS)
 
     with st.sidebar:
         st.header(f"🏆 {tid}")
@@ -165,12 +182,10 @@ else:
                 with cols[i]:
                     st.markdown(f"<div style='text-align:center; background:#444; color:white; border-radius:10px; padding:5px; margin-bottom:15px;'>{fase.upper()}</div>", unsafe_allow_html=True)
                     for _, r in df_t[df_t['fase'] == fase].iterrows():
-                        done = is_done(r['finalizado'])
                         v, _ = obter_vencedor(r)
                         sc = f"{r['gols_a']} x {r['gols_b']}" if r['modo_copa'] == "Só Ida" else f"{r['ida_a']+r['volta_a']} x {r['ida_b']+r['volta_b']}"
-                        if done and (int(r['pen_a'])+int(r['pen_b']) > 0): sc += f" <br><small>(P: {r['pen_a']}x{r['pen_b']})</small>"
-                        b_c = "#4CAF50" if done else "#ccc"
-                        st.markdown(f"""<div style="border: 2px solid {b_c}; background: white; border-radius: 20px; padding: 10px; margin-bottom: 20px; text-align: center; color:black;"><div style="font-size: 11px; font-weight: bold; color: #777;">{r['a']} x {r['b']}</div><div style="font-size: 20px; font-weight: 900; margin: 5px 0;">{sc}</div><div style="border-top: 1px solid #eee; padding-top: 5px; font-size: 10px;">Vencedor: <b>{v}</b></div></div>""", unsafe_allow_html=True)
+                        if is_done(r['finalizado']) and (int(r['pen_a'])+int(r['pen_b']) > 0): sc += f" <br><small>(P: {r['pen_a']}x{r['pen_b']})</small>"
+                        st.markdown(f"""<div style="border: 2px solid #ccc; background: white; border-radius: 20px; padding: 10px; margin-bottom: 20px; text-align: center; color:black;"><div style="font-size: 11px; font-weight: bold; color: #777;">{r['a']} x {r['b']}</div><div style="font-size: 20px; font-weight: 900; margin: 5px 0;">{sc}</div><div style="border-top: 1px solid #eee; padding-top: 5px; font-size: 10px;">Vencedor: <b>{v}</b></div></div>""", unsafe_allow_html=True)
 
     # --- ABA ADMIN ---
     elif menu == "⚙️ Admin":
@@ -197,24 +212,19 @@ else:
                         if not fin.empty: camp, vice = obter_vencedor(fin.iloc[0])
                         if not t3d.empty: terc, _ = obter_vencedor(t3d.iloc[0])
 
-                    # AJUSTE DE HORÁRIO (Brasil -3h do servidor padrão)
-                    hora_brasil = datetime.now() - timedelta(hours=3)
-                    
-                    nova_linha = pd.DataFrame([{
-                        'torneio_id': tid, 'formato': fmt, 'campeao': camp, 'vice': vice, 'terceiro': terc,
-                        'data_fim': hora_brasil.strftime("%d/%m/%Y %H:%M")
-                    }])
-                    
+                    # Ajuste de Horário Brasil
+                    hora_br = (datetime.utcnow() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
+                    nova_linha = pd.DataFrame([{'torneio_id': tid, 'formato': fmt, 'campeao': camp, 'vice': vice, 'terceiro': terc, 'data_fim': hora_br}])
                     df_hist_novo = pd.concat([df_hist, nova_linha], ignore_index=True)
                     conn.update(worksheet=ABA_HISTORICO, data=df_hist_novo)
                     st.success("Copiado para o Histórico!")
                     st.balloons()
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Erro: {e}")
+                    st.error(f"Erro ao salvar: {e}")
 
             st.divider()
-            if st.button("🚨 EXCLUIR TORNEIO (CUIDADO)"):
+            if st.button("🚨 EXCLUIR TORNEIO"):
                 salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                 st.session_state.torneio_ativo = None
                 st.rerun()
