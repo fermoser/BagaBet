@@ -25,7 +25,9 @@ def money(v):
     return f'<span style="color:{cor}; font-weight:bold;">{val_fmt}</span>'
 
 def carregar_tudo():
-    try: return conn.read(ttl=0)
+    try: 
+        df = conn.read(ttl=0)
+        return df if df is not None else pd.DataFrame()
     except: return pd.DataFrame()
 
 def carregar_dados_torneio(nome_torneio):
@@ -87,8 +89,13 @@ def atualizar_confrontos_copa(jogos):
 if 'torneio_ativo' not in st.session_state:
     st.markdown("<h1 style='text-align: center;'>⚽ BAGA BET PRO</h1>", unsafe_allow_html=True)
     df_all = carregar_tudo()
+    
     if not df_all.empty and 'torneio_id' in df_all.columns:
         st.subheader("📂 Torneios Salvos")
+        # Correção aqui: Verifica se a coluna formato existe, se não, preenche com 'COPA'
+        if 'formato' not in df_all.columns:
+            df_all['formato'] = 'COPA'
+        
         dict_f = dict(zip(df_all['torneio_id'], df_all['formato']))
         cols = st.columns(3)
         for i, (tid, form) in enumerate(dict_f.items()):
@@ -97,6 +104,7 @@ if 'torneio_ativo' not in st.session_state:
                 st.session_state.formato = form
                 st.session_state.jogos = carregar_dados_torneio(tid)
                 st.rerun()
+                
     st.divider()
     c1, c2 = st.columns(2)
     n_id = c1.text_input("Novo ID")
@@ -106,7 +114,7 @@ if 'torneio_ativo' not in st.session_state:
             st.session_state.torneio_ativo, st.session_state.formato, st.session_state.jogos = n_id, n_form, []
             st.rerun()
 else:
-    # --- INTERFACE DO TORNEIO ---
+    # --- INTERFACE DO TORNEIO (O RESTANTE SEGUE O MESMO) ---
     formato = st.session_state.formato
     with st.sidebar:
         st.title(f"{st.session_state.torneio_ativo}")
@@ -179,7 +187,7 @@ else:
 
     elif menu == "📊 Tabela/Chaves":
         if formato == "LIGA":
-            st.header("Tabela")
+            st.header("Tabela de Classificação")
             res = {}
             for j in st.session_state.jogos:
                 for t in [j['a'], j['b']]:
@@ -194,7 +202,7 @@ else:
             df_t = pd.DataFrame.from_dict(res, orient='index').reset_index().rename(columns={'index':'Time'})
             st.table(df_t.sort_values(["P","V","GP"], ascending=False))
         else:
-            st.info("Mata-Mata Ativo. Acompanhe os jogos na aba anterior.")
+            st.info("Mata-Mata em andamento. Veja os resultados na aba Jogos.")
 
     elif menu == "🤑 Ranking":
         st.header("Ranking Financeiro")
