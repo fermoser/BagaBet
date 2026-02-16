@@ -1,5 +1,5 @@
 import streamlit as st
-import pd
+import pandas as pd
 from itertools import combinations
 from streamlit_gsheets import GSheetsConnection
 from datetime import datetime, timedelta
@@ -228,3 +228,4 @@ else:
                 salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                 st.session_state.torneio_ativo = None
                 st.rerun()
+
