@@ -1,5 +1,5 @@
 import streamlit as st
-import pd
+import pandas as pd
 from itertools import combinations
 from streamlit_gsheets import GSheetsConnection
 
@@ -30,7 +30,7 @@ def carregar_dados():
 def salvar_dados(df):
     conn.update(data=df[COLUNAS].copy())
     st.cache_data.clear()
-    st.rerun() # O segredo está em manter o state antes do rerun
+    st.rerun()
 
 def is_done(val):
     return str(val).upper().strip() in ["1", "SIM", "TRUE"]
@@ -58,14 +58,17 @@ df_db = carregar_dados()
 if st.session_state.torneio_ativo is None:
     st.title("⚽ BAGA GESTOR")
     
-    # Lista Torneios
     torneios_salvos = df_db.dropna(subset=['torneio_id'])['torneio_id'].unique() if not df_db.empty else []
     
     if len(torneios_salvos) > 0:
         st.subheader("📂 Abrir Torneio")
         cols = st.columns(3)
         for i, t_nome in enumerate(torneios_salvos):
-            fmt_t = df_db[df_db['torneio_id'] == t_nome]['formato'].iloc[0]
+            # Tenta pegar o formato, se falhar assume COPA
+            try:
+                fmt_t = df_db[df_db['torneio_id'] == t_nome]['formato'].iloc[0]
+            except:
+                fmt_t = "COPA"
             if cols[i%3].button(f"🏆 {t_nome} ({fmt_t})", key=f"btn_load_{t_nome}"):
                 st.session_state.torneio_ativo = t_nome
                 st.session_state.formato = fmt_t
@@ -103,7 +106,6 @@ else:
         if df_t.empty:
             st.info("Sem jogos. Vá em Admin para gerar.")
         else:
-            # Lógica Progressão Copa
             if fmt == "COPA":
                 fases = list(df_t['fase'].unique())
                 u_fase = fases[-1]
@@ -124,7 +126,6 @@ else:
                             novos.append({'torneio_id': tid, 'formato': 'COPA', 'fase': prox, 'a': v[i], 'b': v[i+1], 'finalizado': '0', 'modo_copa': modo})
                     salvar_dados(pd.concat([df_db, pd.DataFrame(novos)], ignore_index=True))
 
-            # Exibição
             ordem = sorted(df_t['fase'].unique(), key=lambda x: 1 if x == "Final" else 0)
             for f in ordem:
                 st.subheader(f"📍 {f}")
@@ -188,23 +189,41 @@ else:
                         if done and (r['pen_a']+r['pen_b'] > 0): sc += f" <br><small>(P: {r['pen_a']}x{r['pen_b']})</small>"
                         b_c = "#4CAF50" if done else "#ccc"
                         st.markdown(f"""<div style="border: 2px solid {b_c}; background: white; border-radius: 20px; padding: 10px; margin-bottom: 20px; text-align: center; box-shadow: 2px 2px 8px rgba(0,0,0,0.1); color:black;"><div style="font-size: 11px; font-weight: bold; color: #777;">{r['a']} x {r['b']}</div><div style="font-size: 20px; font-weight: 900; margin: 5px 0;">{sc}</div><div style="border-top: 1px solid #eee; padding-top: 5px; font-size: 10px;">Vencedor: <b>{venc}</b></div></div>""", unsafe_allow_html=True)
+            
+            # Pódio automático ao final
+            fin = df_t[df_t['fase'] == 'Final']
+            if not fin.empty and is_done(fin.iloc[0]['finalizado']):
+                st.divider()
+                st.balloons()
+                camp, vice = obter_vencedor(fin.iloc[0])
+                st.header("🏆 Pódio Final")
+                c1, c2, c3 = st.columns(3)
+                c1.success(f"🥇 **CAMPEÃO**\n\n{camp}")
+                c2.info(f"🥈 **VICE**\n\n{vice}")
+                t3d = df_t[df_t['fase'] == '3º Lugar']
+                if not t3d.empty and is_done(t3d.iloc[0]['finalizado']):
+                    t3, _ = obter_vencedor(t3d.iloc[0])
+                    c3.warning(f"🥉 **3º LUGAR**\n\n{t3}")
 
     elif menu == "⚙️ Admin":
         if is_admin:
             with st.expander("🚀 Iniciar Torneio"):
-                t_txt = st.text_area("Times")
-                if st.button("Gerar"):
+                t_txt = st.text_area("Times (um por linha)")
+                if st.button("Gerar Jogos"):
                     l = [x.strip() for x in t_txt.split('\n') if x.strip()]
-                    novos = []
-                    modo = st.session_state.modo if 'modo' in st.session_state else "Ida e Volta"
-                    if fmt == "LIGA":
-                        for a, b in combinations(l, 2):
-                            novos.append({'torneio_id': tid, 'formato': 'LIGA', 'fase': 'Pontos Corridos', 'a': a, 'b': b, 'finalizado': '0'})
+                    if len(l) < 2:
+                        st.error("Mínimo de 2 times.")
                     else:
-                        f_n = "Oitavas" if len(l) > 8 else "Quartas" if len(l) > 4 else "Semifinal"
-                        for i in range(0, len(l), 2):
-                            if i+1 < len(l): novos.append({'torneio_id': tid, 'formato': 'COPA', 'fase': f_n, 'a': l[i], 'b': l[i+1], 'finalizado': '0', 'modo_copa': modo})
-                    salvar_dados(pd.concat([df_db, pd.DataFrame(novos)], ignore_index=True))
+                        novos = []
+                        modo = st.session_state.modo if 'modo' in st.session_state else "Ida e Volta"
+                        if fmt == "LIGA":
+                            for a, b in combinations(l, 2):
+                                novos.append({'torneio_id': tid, 'formato': 'LIGA', 'fase': 'Pontos Corridos', 'a': a, 'b': b, 'finalizado': '0'})
+                        else:
+                            f_n = "Oitavas" if len(l) > 8 else "Quartas" if len(l) > 4 else "Semifinal"
+                            for i in range(0, len(l), 2):
+                                if i+1 < len(l): novos.append({'torneio_id': tid, 'formato': 'COPA', 'fase': f_n, 'a': l[i], 'b': l[i+1], 'finalizado': '0', 'modo_copa': modo})
+                        salvar_dados(pd.concat([df_db, pd.DataFrame(novos)], ignore_index=True))
             if st.button("🚨 EXCLUIR"):
                 salvar_dados(df_db[df_db['torneio_id'] != tid])
                 st.session_state.torneio_ativo = None
