@@ -6,6 +6,23 @@ from datetime import datetime, timedelta
 
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="BAGA GESTOR PRO", layout="wide")
+# --- ESTILO CSS PARA NÚMEROS EM AMARELO SUAVE ---
+st.markdown("""
+    <style>
+    /* Estiliza os números dentro dos campos de input */
+    input[type=number] {
+        color: #F1C40F !important; /* Amarelo Ouro suave */
+        font-weight: bold !important;
+        font-size: 18px !important;
+    }
+    /* Estiliza os labels e o texto geral dos inputs se necessário */
+    .stNumberInput div[data-baseweb="input"] {
+        background-color: #262730; /* Fundo escuro para contrastar com o amarelo */
+        border-radius: 10px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # Nomes das abas
@@ -228,4 +245,5 @@ else:
                 salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                 st.session_state.torneio_ativo = None
                 st.rerun()
+
 
