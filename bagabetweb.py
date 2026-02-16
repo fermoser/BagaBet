@@ -14,7 +14,7 @@ st.markdown("""
     .main { background-color: #f8f9fa; }
     .stButton>button { border-radius: 8px; font-weight: 600; text-transform: uppercase; }
     
-    /* Box do Placar - Ajuste Fino */
+    /* Box do Placar */
     div[data-testid="stVerticalBlock"] > div > div[data-testid="stVerticalBlock"] {
         background-color: transparent;
     }
@@ -27,13 +27,13 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0,0,0,0.05);
     }
     .gols-finalizado { 
-        color: #2e7d32; /* Verde Esmeralda Sóbrio */
+        color: #2e7d32; /* Verde Esmeralda */
         font-weight: 900; 
         font-size: 2.8rem;
         font-family: 'Arial Black', sans-serif;
     }
     .gols-aberto { 
-        color: #b0bec5; /* Cinza claro placeholder */
+        color: #b0bec5; /* Cinza claro */
         font-weight: 900;
         font-size: 2.8rem;
         font-family: 'Arial Black', sans-serif;
@@ -106,6 +106,7 @@ if 'times' not in st.session_state: st.session_state.times = []
 if 'modo_jogo' not in st.session_state: st.session_state.modo_jogo = "LIGA"
 if 'autenticado' not in st.session_state: st.session_state.autenticado = False
 if 'menu_ativo' not in st.session_state: st.session_state.menu_ativo = "Jogos"
+if 'df_raw' not in st.session_state: st.session_state.df_raw = pd.DataFrame()
 
 # --- TELA INICIAL (MENU DE ENTRADA) ---
 if st.session_state.estagio == 'inicio':
@@ -117,15 +118,16 @@ if st.session_state.estagio == 'inicio':
         
         # Botão Carregar Nuvem
         if st.button("☁️ CARREGAR TORNEIO SALVO", use_container_width=True, type="primary"):
-            js, ts, _ = carregar_tudo()
+            js, ts, raw = carregar_tudo()
             if js:
                 st.session_state.jogos = js
                 st.session_state.times = ts
+                st.session_state.df_raw = raw
                 st.session_state.estagio = 'painel'
-                st.session_state.modo_jogo = "LIGA" # Por enquanto default
+                st.session_state.modo_jogo = "LIGA" # Default por enquanto
                 st.rerun()
             else:
-                st.warning("Nenhum torneio encontrado na nuvem. Crie um novo abaixo.")
+                st.warning("Nenhum torneio encontrado na nuvem.")
 
         st.markdown("### Criar Novo Jogo")
         col_a, col_b = st.columns(2)
@@ -137,7 +139,6 @@ if st.session_state.estagio == 'inicio':
             st.rerun()
             
         if col_b.button("⚔️ MODO COPA (Mata-Mata)", use_container_width=True):
-            # AQUI ENTRA A LÓGICA DA COPA FUTURAMENTE
             st.session_state.modo_jogo = "COPA"
             st.session_state.estagio = 'painel'
             st.session_state.menu_ativo = "Admin"
@@ -206,9 +207,25 @@ else:
                 tab_v, tab_n = st.tabs(["Ver Apostas", "Nova Aposta"])
                 with tab_v:
                     if j['apostas']:
-                        df_Show = pd.DataFrame(j['apostas'])
-                        df_Show['Palpite'] = df_Show['opcao'].map({"A": j['a'], "B": j['b'], "E": "Empate"})
-                        st.dataframe(df_Show[['nome', 'Palpite', 'valor']], use_container_width=True)
+                        df_a = pd.DataFrame(j['apostas'])
+                        df_a['Palpite'] = df_a['opcao'].map({"A": j['a'], "B": j['b'], "E": "Empate"})
+                        
+                        # --- [RESTORED] LÓGICA DE RETORNO E LUCRO ---
+                        if j['finalizado']:
+                            res = "A" if j['ga'] > j['gb'] else "B" if j['gb'] > j['ga'] else "E"
+                            pote = sum(df_a['valor'])
+                            venc_v = sum(df_a[df_a['opcao'] == res]['valor'])
+                            
+                            df_a['Retorno'] = df_a.apply(lambda r: (r['valor']/venc_v * pote) if r['opcao'] == res and venc_v > 0 else 0.0, axis=1)
+                            df_a['Lucro'] = df_a['Retorno'] - df_a['valor']
+                            
+                            df_show = df_a.copy()
+                            df_show['Retorno'] = df_show['Retorno'].apply(money_raw)
+                            df_show['Lucro'] = df_show['Lucro'].apply(money) # Colorido
+                            st.write(df_show[['nome', 'Palpite', 'valor', 'Retorno', 'Lucro']].to_html(escape=False, index=False), unsafe_allow_html=True)
+                        else:
+                            # Apenas mostra apostas simples
+                            st.dataframe(df_a[['nome', 'Palpite', 'valor']], use_container_width=True)
                     else: st.caption("Nenhuma aposta ainda.")
                 with tab_n:
                     if sou_admin and not j['finalizado']:
@@ -227,14 +244,29 @@ else:
         if sou_admin:
             st.header("⚙️ Configuração do Torneio")
             
+            # --- [RESTORED] MONITOR DE DADOS ---
+            with st.expander("🔍 MONITOR DE DADOS (Raw vs Processado)"):
+                c1, c2 = st.columns(2)
+                c1.write("**Planilha (Raw)**")
+                # Mostra colunas principais da planilha raw
+                if not st.session_state.df_raw.empty:
+                    c1.dataframe(st.session_state.df_raw[['a', 'b', 'finalizado', 'apostas_abertas']])
+                else: c1.write("Vazio")
+                
+                c2.write("**App (Memória)**")
+                diag = [{"Jogo": f"{j['a']}x{j['b']}", "Fim": j['finalizado'], "Aberto": j['apostas_abertas']} for j in st.session_state.jogos]
+                c2.table(diag)
+
+            st.divider()
+
             # BLUCO 1: RESET
             with st.container(border=True):
                 st.subheader("⚠️ Zona de Perigo")
                 c_res1, c_res2 = st.columns(2)
                 if c_res1.button("🧹 LIMPAR JOGOS (Manter Times)", use_container_width=True):
-                    # Limpa jogos, salva vazio na nuvem, mas mantem st.session_state.times
                     salvar_tudo([]) 
                     st.session_state.jogos = []
+                    st.session_state.df_raw = pd.DataFrame()
                     st.success("Jogos resetados! Times mantidos.")
                     st.rerun()
                     
@@ -242,6 +274,7 @@ else:
                     salvar_tudo([])
                     st.session_state.jogos = []
                     st.session_state.times = []
+                    st.session_state.df_raw = pd.DataFrame()
                     st.warning("Tudo apagado!")
                     st.rerun()
 
@@ -249,14 +282,11 @@ else:
             if st.session_state.modo_jogo == "LIGA":
                 st.subheader("🏆 Criar Nova Liga")
                 
-                # Método Input Antigo
                 qtd_times = st.number_input("Quantidade de Times", min_value=2, max_value=20, value=4, step=1)
                 
-                # Se já houver times na memória (pelo reset), pré-carrega
                 novos_times = []
                 cols = st.columns(2)
                 for k in range(qtd_times):
-                    # Tenta pegar o nome antigo se existir, senão vazio
                     val_padrao = st.session_state.times[k] if k < len(st.session_state.times) else f"Time {k+1}"
                     t_nome = cols[k % 2].text_input(f"Nome do Time {k+1}", value=val_padrao, key=f"t_in_{k}")
                     novos_times.append(t_nome)
@@ -277,14 +307,12 @@ else:
             elif st.session_state.modo_jogo == "COPA":
                 st.subheader("⚔️ Configurar Copa (Mata-Mata)")
                 st.info("Aguardando regras do formato Copa...")
-                # Aqui vamos inserir os inputs da Copa depois
 
         else: st.error("Faça login no menu lateral.")
 
     # --- ABA RANKING ---
     elif st.session_state.menu_ativo == "Ranking":
         st.header("🤑 Ranking Financeiro")
-        # (Lógica de Ranking igual à anterior, mantida para economizar espaço visual aqui)
         rank = {}
         for j in st.session_state.jogos:
             if j['finalizado'] and j['ga'] is not None:
@@ -311,7 +339,7 @@ else:
             for j in st.session_state.jogos:
                 if j['ga'] is not None and j['gb'] is not None:
                     a, b = j['a'], j['b']
-                    # Garante que times existam no dict (caso de mudança manual)
+                    # Evita erro de chave se os times mudarem
                     if a not in stats: stats[a] = {"P":0,"J":0,"V":0,"E":0,"D":0,"SG":0}
                     if b not in stats: stats[b] = {"P":0,"J":0,"V":0,"E":0,"D":0,"SG":0}
                     
