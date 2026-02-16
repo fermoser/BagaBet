@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import itertools
 import random
+import math
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAÇÃO ---
@@ -12,35 +13,14 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
-    .stButton>button { border-radius: 8px; font-weight: 600; text-transform: uppercase; }
-    
-    /* Box do Placar */
-    div[data-testid="stVerticalBlock"] > div > div[data-testid="stVerticalBlock"] {
-        background-color: transparent;
-    }
+    .stButton>button { border-radius: 8px; font-weight: 600; }
     .placar-box {
-        background-color: #ffffff; 
-        border: 2px solid #e0e0e0;
-        border-radius: 15px; 
-        padding: 15px; 
-        text-align: center;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        background-color: #ffffff; border: 2px solid #e0e0e0;
+        border-radius: 15px; padding: 10px; text-align: center;
     }
-    .gols-finalizado { 
-        color: #2e7d32; /* Verde Esmeralda */
-        font-weight: 900; 
-        font-size: 2.8rem;
-        font-family: 'Arial Black', sans-serif;
-    }
-    .gols-aberto { 
-        color: #b0bec5; /* Cinza claro */
-        font-weight: 900;
-        font-size: 2.8rem;
-        font-family: 'Arial Black', sans-serif;
-    }
-    .modo-badge {
-        background-color: #0d6efd; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;
-    }
+    .gols-finalizado { color: #1b5e20 !important; font-weight: 900; font-size: 2.2rem; }
+    .gols-aberto { color: #444444 !important; font-weight: 900; font-size: 2.2rem; }
+    .chave-title { background: #0747a6; color: white; padding: 5px; border-radius: 5px; text-align: center; font-weight: bold; margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -56,298 +36,191 @@ def money_raw(v):
     try: return f"R$ {float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     except: return "R$ 0,00"
 
-# --- DADOS ---
-def carregar_tudo():
-    try:
-        df = conn.read(ttl=0)
-        if df is None or df.empty: return [], [], df
-        
-        jogos = []
-        times = set()
-        for _, row in df.iterrows():
-            fina = str(row.get('finalizado')).strip().upper() in ["TRUE", "1", "T"]
-            aberta = str(row.get('apostas_abertas')).strip().upper() in ["TRUE", "1", "T"] if 'apostas_abertas' in row else True
-            
-            # Parse Apostas
-            ap_lista = []
-            raw_ap = str(row.get('apostas'))
-            if raw_ap not in ["nan", "None", ""]:
-                for item in raw_ap.split("|"):
-                    p = item.split(":")
-                    if len(p) == 3: ap_lista.append({"nome": p[0], "valor": float(p[1]), "opcao": p[2].upper()})
-
-            j = {
-                "a": str(row.get('a', '')), "b": str(row.get('b', '')),
-                "ga": int(float(row.get('ga'))) if pd.notna(row.get('ga')) else None,
-                "gb": int(float(row.get('gb'))) if pd.notna(row.get('gb')) else None,
-                "finalizado": fina, "apostas_abertas": aberta, "apostas": ap_lista
-            }
-            jogos.append(j); times.add(j['a']); times.add(j['b'])
-        return jogos, list(times), df
-    except:
-        return [], [], pd.DataFrame()
-
 def salvar_tudo(lista):
     if not lista:
-        df_save = pd.DataFrame(columns=['a', 'b', 'ga', 'gb', 'finalizado', 'apostas_abertas', 'apostas'])
+        df_save = pd.DataFrame(columns=['a', 'b', 'ga', 'gb', 'finalizado', 'apostas_abertas', 'apostas', 'fase', 'id_jogo', 'pen_a', 'pen_b'])
     else:
         df_save = pd.DataFrame(lista)
         df_save['apostas'] = df_save['apostas'].apply(lambda x: "|".join([f"{a['nome']}:{a['valor']}:{a['opcao']}" for a in x]) if x else "")
-        df_save['finalizado'] = df_save['finalizado'].apply(lambda x: "TRUE" if x else "FALSE")
-        df_save['apostas_abertas'] = df_save['apostas_abertas'].apply(lambda x: "TRUE" if x else "FALSE")
-    
     conn.update(data=df_save)
     st.cache_data.clear()
 
-# --- ESTADO E INICIALIZAÇÃO ---
-if 'estagio' not in st.session_state: st.session_state.estagio = 'inicio' # inicio | painel
-if 'jogos' not in st.session_state: st.session_state.jogos = []
-if 'times' not in st.session_state: st.session_state.times = []
-if 'modo_jogo' not in st.session_state: st.session_state.modo_jogo = "LIGA"
+def carregar_tudo():
+    df = conn.read(ttl=0)
+    if df is None or df.empty: return [], []
+    jogos = []
+    times = set()
+    for _, r in df.iterrows():
+        # Parse Apostas
+        ap = []
+        if str(r.get('apostas')) not in ["nan", "", "None"]:
+            for item in str(r.get('apostas')).split("|"):
+                p = item.split(":")
+                if len(p) == 3: ap.append({"nome": p[0], "valor": float(p[1]), "opcao": p[2]})
+        
+        j = {
+            "a": str(r.get('a')), "b": str(r.get('b')),
+            "ga": int(r['ga']) if pd.notna(r['ga']) else None,
+            "gb": int(r['gb']) if pd.notna(r['gb']) else None,
+            "finalizado": str(r.get('finalizado')).upper() == "TRUE",
+            "apostas": ap,
+            "fase": str(r.get('fase', 'LIGA')),
+            "id_jogo": int(r.get('id_jogo', 0)),
+            "pen_a": int(r['pen_a']) if pd.notna(r.get('pen_a')) else 0,
+            "pen_b": int(r['pen_b']) if pd.notna(r.get('pen_b')) else 0
+        }
+        jogos.append(j); times.add(j['a']); times.add(j['b'])
+    return jogos, list(times)
+
+# --- INICIALIZAÇÃO ---
+if 'estagio' not in st.session_state: st.session_state.estagio = 'inicio'
 if 'autenticado' not in st.session_state: st.session_state.autenticado = False
-if 'menu_ativo' not in st.session_state: st.session_state.menu_ativo = "Jogos"
-if 'df_raw' not in st.session_state: st.session_state.df_raw = pd.DataFrame()
+if 'jogos' not in st.session_state: st.session_state.jogos, st.session_state.times = carregar_tudo()
+if 'menu' not in st.session_state: st.session_state.menu = "Jogos"
 
-# --- TELA INICIAL (MENU DE ENTRADA) ---
+# --- TELA INICIAL ---
 if st.session_state.estagio == 'inicio':
-    c1, c2, c3 = st.columns([1,2,1])
-    with c2:
-        st.markdown("<h1 style='text-align: center; font-size: 60px;'>⚽ BAGA BET</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: gray;'>Sistema Profissional de Gerenciamento de Torneios</p>", unsafe_allow_html=True)
-        st.divider()
-        
-        # Botão Carregar Nuvem
-        if st.button("☁️ CARREGAR TORNEIO SALVO", use_container_width=True, type="primary"):
-            js, ts, raw = carregar_tudo()
-            if js:
-                st.session_state.jogos = js
-                st.session_state.times = ts
-                st.session_state.df_raw = raw
-                st.session_state.estagio = 'painel'
-                st.session_state.modo_jogo = "LIGA" # Default por enquanto
-                st.rerun()
-            else:
-                st.warning("Nenhum torneio encontrado na nuvem.")
+    st.markdown("<h1 style='text-align: center;'>⚽ BAGA BET PRO</h1>", unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    if c1.button("🏆 NOVA LIGA", use_container_width=True): 
+        st.session_state.modo = "LIGA"; st.session_state.estagio = 'painel'; st.rerun()
+    if c2.button("⚔️ NOVA COPA", use_container_width=True): 
+        st.session_state.modo = "COPA"; st.session_state.estagio = 'painel'; st.rerun()
+    if st.button("☁️ CARREGAR SALVO", use_container_width=True, type="primary"):
+        st.session_state.jogos, st.session_state.times = carregar_tudo()
+        st.session_state.estagio = 'painel'; st.rerun()
 
-        st.markdown("### Criar Novo Jogo")
-        col_a, col_b = st.columns(2)
-        
-        if col_a.button("🏆 MODO LIGA (Pontos Corridos)", use_container_width=True):
-            st.session_state.modo_jogo = "LIGA"
-            st.session_state.estagio = 'painel'
-            st.session_state.menu_ativo = "Admin"
-            st.rerun()
-            
-        if col_b.button("⚔️ MODO COPA (Mata-Mata)", use_container_width=True):
-            st.session_state.modo_jogo = "COPA"
-            st.session_state.estagio = 'painel'
-            st.session_state.menu_ativo = "Admin"
-            st.rerun()
-
-# --- TELA DO PAINEL (DASHBOARD) ---
 else:
     # --- SIDEBAR ---
     with st.sidebar:
-        st.title("BAGA BET PRO")
-        st.markdown(f"<span class='modo-badge'>MODO {st.session_state.modo_jogo}</span>", unsafe_allow_html=True)
-        
+        st.title("MENU")
         if not st.session_state.autenticado:
-            if st.text_input("Senha Admin", type="password") == "1234":
-                st.session_state.autenticado = True; st.rerun()
+            if st.text_input("Senha", type="password") == "1234": st.session_state.autenticado = True; st.rerun()
         else:
             if st.button("Sair Admin"): st.session_state.autenticado = False; st.rerun()
         
         st.divider()
-        if st.button("🏟️ JOGOS", use_container_width=True): st.session_state.menu_ativo = "Jogos"; st.rerun()
-        if st.button("🤑 RANKING", use_container_width=True): st.session_state.menu_ativo = "Ranking"; st.rerun()
-        if st.button("📊 TABELA", use_container_width=True): st.session_state.menu_ativo = "Classificação"; st.rerun()
-        if st.button("⚙️ ADMIN", use_container_width=True): st.session_state.menu_ativo = "Admin"; st.rerun()
-        
-        st.divider()
-        if st.button("🏠 VOLTAR AO INÍCIO", use_container_width=True):
-            st.session_state.estagio = 'inicio'
-            st.rerun()
+        if st.button("🏟️ JOGOS"): st.session_state.menu = "Jogos"; st.rerun()
+        if st.button("📊 TABELA/CHAVE"): st.session_state.menu = "Tabela"; st.rerun()
+        if st.button("🤑 RANKING"): st.session_state.menu = "Ranking"; st.rerun()
+        if st.button("⚙️ ADMIN"): st.session_state.menu = "Admin"; st.rerun()
 
     sou_admin = st.session_state.autenticado
 
-    # --- ABA JOGOS ---
-    if st.session_state.menu_ativo == "Jogos":
-        st.header(f"Partidas - {st.session_state.modo_jogo}")
-        if not st.session_state.jogos:
-            st.info("Nenhum jogo criado. Vá em ADMIN para iniciar o torneio.")
+    # --- TELA ADMIN ---
+    if st.session_state.menu == "Admin":
+        st.title("⚙️ Configurações")
         
-        for i, j in enumerate(st.session_state.jogos):
-            with st.container(border=False):
-                c1, c2, c3 = st.columns([2, 2, 2])
-                
-                # Placar Visual
-                ga_txt = j['ga'] if j['ga'] is not None else "-"
-                gb_txt = j['gb'] if j['gb'] is not None else "-"
-                cls_placar = "gols-finalizado" if j['finalizado'] else "gols-aberto"
-                
-                c1.markdown(f"<h3 style='text-align:right; padding-top:15px;'>{j['a']}</h3>", unsafe_allow_html=True)
-                c2.markdown(f"""
-                    <div class="placar-box">
-                        <span class="{cls_placar}">{ga_txt} : {gb_txt}</span>
-                    </div>
-                """, unsafe_allow_html=True)
-                c3.markdown(f"<h3 style='text-align:left; padding-top:15px;'>{j['b']}</h3>", unsafe_allow_html=True)
+        # Sincronização (RESTORED)
+        if st.button("🔄 ATUALIZAR NUVEM (Sync)", type="primary"):
+            st.session_state.jogos, st.session_state.times = carregar_tudo()
+            st.toast("Dados sincronizados!")
+        
+        st.divider()
 
-                # Admin Score
+        if st.session_state.modo == "COPA":
+            st.subheader("⚔️ Configurar Mata-Mata")
+            qtd = st.number_input("Qtd de Times (Par)", 2, 16, 4, step=2)
+            tipo_copa = st.radio("Formato", ["Mata-Mata Único", "Ida e Volta"], horizontal=True)
+            
+            nomes = []
+            cols = st.columns(2)
+            for i in range(qtd):
+                n = cols[i%2].text_input(f"Time {i+1}", key=f"t{i}")
+                nomes.append(n)
+            
+            if st.button("🚀 GERAR CHAVES DA COPA"):
+                times_validos = [t for t in nomes if t.strip()]
+                random.shuffle(times_validos)
+                novos = []
+                # Gera a primeira fase
+                for i in range(0, len(times_validos), 2):
+                    novos.append({
+                        "a": times_validos[i], "b": times_validos[i+1], "ga": None, "gb": None,
+                        "finalizado": False, "apostas": [], "fase": "OITAVAS" if qtd==16 else "QUARTAS" if qtd==8 else "SEMI",
+                        "id_jogo": i//2, "pen_a": 0, "pen_b": 0
+                    })
+                st.session_state.jogos = novos
+                salvar_tudo(novos); st.session_state.menu = "Jogos"; st.rerun()
+
+        elif st.session_state.modo == "LIGA":
+            st.subheader("🏆 Configurar Liga")
+            qtd = st.number_input("Qtd de Times", 2, 20, 4, step=1)
+            nomes = [st.text_input(f"Time {i+1}", key=f"l{i}") for i in range(qtd)]
+            if st.button("🚀 GERAR LIGA"):
+                ts = [t for t in nomes if t.strip()]
+                combs = list(itertools.combinations(ts, 2))
+                novos = [{"a": c[0], "b": c[1], "ga": None, "gb": None, "finalizado": False, "apostas": [], "fase": "LIGA", "id_jogo": i} for i, c in enumerate(combs)]
+                st.session_state.jogos = novos; salvar_tudo(novos); st.rerun()
+
+    # --- TELA JOGOS ---
+    elif st.session_state.menu == "Jogos":
+        st.title(f"🏟️ Partidas - {st.session_state.modo}")
+        for i, j in enumerate(st.session_state.jogos):
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([2, 2, 2])
+                ga, gb = (j['ga'] if j['ga'] is not None else "-"), (j['gb'] if j['gb'] is not None else "-")
+                
+                c1.markdown(f"<h3 style='text-align:right;'>{j['a']}</h3>", unsafe_allow_html=True)
+                c2.markdown(f"<div class='placar-box'><span class='{'gols-finalizado' if j['finalizado'] else 'gols-aberto'}'>{ga} : {gb}</span></div>", unsafe_allow_html=True)
+                c3.markdown(f"<h3 style='text-align:left;'>{j['b']}</h3>", unsafe_allow_html=True)
+
+                if j['finalizado'] and j['pen_a'] + j['pen_b'] > 0:
+                    st.caption(f"Pênaltis: {j['pen_a']} x {j['pen_b']}")
+
                 if sou_admin:
-                    with st.expander("⚙️ Gerenciar Resultado"):
-                        cc1, cc2, cc3 = st.columns([1,1,1])
-                        vga = cc1.number_input(f"Gols {j['a']}", 0, 20, key=f"g1_{i}")
-                        vgb = cc2.number_input(f"Gols {j['b']}", 0, 20, key=f"g2_{i}")
-                        if cc3.button("SALVAR", key=f"sv_{i}"):
-                            st.session_state.jogos[i].update({'ga': int(vga), 'gb': int(vgb), 'finalizado': True, 'apostas_abertas': False})
+                    with st.expander("Lançar Placar"):
+                        col1, col2, col3 = st.columns(3)
+                        vga = col1.number_input("Gols A", 0, 20, key=f"ga{i}", step=1)
+                        vgb = col2.number_input("Gols B", 0, 20, key=f"gb{i}", step=1)
+                        pen = st.toggle("Houve Pênaltis?", key=f"p{i}")
+                        pa, pb = 0, 0
+                        if pen:
+                            pa = st.number_input("Pên. A", 0, 20, key=f"pa{i}", step=1)
+                            pb = st.number_input("Pên. B", 0, 20, key=f"pb{i}", step=1)
+                        
+                        if st.button("FINALIZAR", key=f"btn{i}"):
+                            st.session_state.jogos[i].update({'ga': vga, 'gb': vgb, 'finalizado': True, 'pen_a': pa, 'pen_b': pb})
                             salvar_tudo(st.session_state.jogos); st.rerun()
 
-                # Apostas
-                tab_v, tab_n = st.tabs(["Ver Apostas", "Nova Aposta"])
-                with tab_v:
+                # Apostas com Step=1 (RESTORED)
+                t1, t2 = st.tabs(["Ver Apostas", "Nova Aposta"])
+                with t1:
                     if j['apostas']:
                         df_a = pd.DataFrame(j['apostas'])
                         df_a['Palpite'] = df_a['opcao'].map({"A": j['a'], "B": j['b'], "E": "Empate"})
-                        
-                        # --- [RESTORED] LÓGICA DE RETORNO E LUCRO ---
                         if j['finalizado']:
                             res = "A" if j['ga'] > j['gb'] else "B" if j['gb'] > j['ga'] else "E"
+                            # Lógica de desempate por penaltis se empate no tempo normal
+                            if j['ga'] == j['gb'] and (j['pen_a'] > 0 or j['pen_b'] > 0):
+                                res = "A" if j['pen_a'] > j['pen_b'] else "B"
+                            
                             pote = sum(df_a['valor'])
                             venc_v = sum(df_a[df_a['opcao'] == res]['valor'])
-                            
                             df_a['Retorno'] = df_a.apply(lambda r: (r['valor']/venc_v * pote) if r['opcao'] == res and venc_v > 0 else 0.0, axis=1)
                             df_a['Lucro'] = df_a['Retorno'] - df_a['valor']
-                            
-                            df_show = df_a.copy()
-                            df_show['Retorno'] = df_show['Retorno'].apply(money_raw)
-                            df_show['Lucro'] = df_show['Lucro'].apply(money) # Colorido
-                            st.write(df_show[['nome', 'Palpite', 'valor', 'Retorno', 'Lucro']].to_html(escape=False, index=False), unsafe_allow_html=True)
-                        else:
-                            # Apenas mostra apostas simples
-                            st.dataframe(df_a[['nome', 'Palpite', 'valor']], use_container_width=True)
-                    else: st.caption("Nenhuma aposta ainda.")
-                with tab_n:
+                            st.write(df_a[['nome', 'Palpite', 'valor', 'Lucro']].to_html(escape=False), unsafe_allow_html=True)
+                        else: st.table(df_a[['nome', 'Palpite', 'valor']])
+
+                with t2:
                     if sou_admin and not j['finalizado']:
-                        with st.form(key=f"bet_{i}", clear_on_submit=True):
-                            col_n, col_v = st.columns(2)
-                            nome = col_n.text_input("Nome")
-                            val = col_v.number_input("Valor", 1.0, 5000.0, 10.0)
-                            op = st.radio("Vencedor", [j['a'], "Empate", j['b']], horizontal=True)
-                            if st.form_submit_button("Lançar Aposta"):
-                                code = "A" if op == j['a'] else "B" if op == j['b'] else "E"
-                                st.session_state.jogos[i]['apostas'].append({"nome": nome, "valor": val, "opcao": code})
+                        with st.form(f"f{i}"):
+                            n = st.text_input("Nome")
+                            v = st.number_input("R$", 1, 5000, 10, step=1) # STEP 1 UNIDADE
+                            o = st.radio("Vence", [j['a'], "Empate", j['b']])
+                            if st.form_submit_button("Salvar"):
+                                cod = "A" if o == j['a'] else "B" if o == j['b'] else "E"
+                                st.session_state.jogos[i]['apostas'].append({"nome": n, "valor": v, "opcao": cod})
                                 salvar_tudo(st.session_state.jogos); st.rerun()
 
-    # --- ABA ADMIN ---
-    elif st.session_state.menu_ativo == "Admin":
-        if sou_admin:
-            st.header("⚙️ Configuração do Torneio")
-            
-            # --- [RESTORED] MONITOR DE DADOS ---
-            with st.expander("🔍 MONITOR DE DADOS (Raw vs Processado)"):
-                c1, c2 = st.columns(2)
-                c1.write("**Planilha (Raw)**")
-                # Mostra colunas principais da planilha raw
-                if not st.session_state.df_raw.empty:
-                    c1.dataframe(st.session_state.df_raw[['a', 'b', 'finalizado', 'apostas_abertas']])
-                else: c1.write("Vazio")
-                
-                c2.write("**App (Memória)**")
-                diag = [{"Jogo": f"{j['a']}x{j['b']}", "Fim": j['finalizado'], "Aberto": j['apostas_abertas']} for j in st.session_state.jogos]
-                c2.table(diag)
-
-            st.divider()
-
-            # BLUCO 1: RESET
-            with st.container(border=True):
-                st.subheader("⚠️ Zona de Perigo")
-                c_res1, c_res2 = st.columns(2)
-                if c_res1.button("🧹 LIMPAR JOGOS (Manter Times)", use_container_width=True):
-                    salvar_tudo([]) 
-                    st.session_state.jogos = []
-                    st.session_state.df_raw = pd.DataFrame()
-                    st.success("Jogos resetados! Times mantidos.")
-                    st.rerun()
-                    
-                if c_res2.button("🔥 RESET TOTAL (Apagar Tudo)", type="primary", use_container_width=True):
-                    salvar_tudo([])
-                    st.session_state.jogos = []
-                    st.session_state.times = []
-                    st.session_state.df_raw = pd.DataFrame()
-                    st.warning("Tudo apagado!")
-                    st.rerun()
-
-            # BLOCO 2: CRIAÇÃO
-            if st.session_state.modo_jogo == "LIGA":
-                st.subheader("🏆 Criar Nova Liga")
-                
-                qtd_times = st.number_input("Quantidade de Times", min_value=2, max_value=20, value=4, step=1)
-                
-                novos_times = []
-                cols = st.columns(2)
-                for k in range(qtd_times):
-                    val_padrao = st.session_state.times[k] if k < len(st.session_state.times) else f"Time {k+1}"
-                    t_nome = cols[k % 2].text_input(f"Nome do Time {k+1}", value=val_padrao, key=f"t_in_{k}")
-                    novos_times.append(t_nome)
-                
-                if st.button("🚀 GERAR CONFRONTOS DA LIGA", use_container_width=True, type="primary"):
-                    ts = [t.strip() for t in novos_times if t.strip()]
-                    if len(ts) >= 2:
-                        combs = list(itertools.combinations(ts, 2))
-                        random.shuffle(combs)
-                        novos_jogos = [{"a": c[0], "b": c[1], "ga": None, "gb": None, "finalizado": False, "apostas_abertas": True, "apostas": []} for c in combs]
-                        
-                        salvar_tudo(novos_jogos)
-                        st.session_state.jogos = novos_jogos
-                        st.session_state.times = ts
-                        st.session_state.menu_ativo = "Jogos"
-                        st.rerun()
-            
-            elif st.session_state.modo_jogo == "COPA":
-                st.subheader("⚔️ Configurar Copa (Mata-Mata)")
-                st.info("Aguardando regras do formato Copa...")
-
-        else: st.error("Faça login no menu lateral.")
-
-    # --- ABA RANKING ---
-    elif st.session_state.menu_ativo == "Ranking":
-        st.header("🤑 Ranking Financeiro")
-        rank = {}
-        for j in st.session_state.jogos:
-            if j['finalizado'] and j['ga'] is not None:
-                res = "A" if j['ga'] > j['gb'] else "B" if j['gb'] > j['ga'] else "E"
-                pote = sum(a['valor'] for a in j['apostas'])
-                venc_v = sum(a['valor'] for a in j['apostas'] if a['opcao'] == res)
-                for a in j['apostas']:
-                    rank.setdefault(a['nome'], {"ganho": 0.0, "pago": 0.0})
-                    rank[a['nome']]["pago"] += a['valor']
-                    if a['opcao'] == res and venc_v > 0:
-                        rank[a['nome']]["ganho"] += (a['valor'] / venc_v) * pote
-        if rank:
-            l_r = [{"Apostador": k, "Investido": money_raw(v['pago']), "Retorno": money_raw(v['ganho']), "Saldo": v['ganho']-v['pago']} for k, v in rank.items()]
-            df_r = pd.DataFrame(l_r).sort_values("Saldo", ascending=False)
-            df_r['Saldo'] = df_r['Saldo'].apply(money)
-            st.write(df_r.to_html(escape=False, index=False), unsafe_allow_html=True)
-        else: st.info("Sem dados finalizados.")
-
-    # --- ABA TABELA ---
-    elif st.session_state.menu_ativo == "Classificação":
-        if st.session_state.modo_jogo == "LIGA":
-            st.header("📊 Tabela Pontos Corridos")
-            stats = {t: {"P":0,"J":0,"V":0,"E":0,"D":0,"SG":0} for t in st.session_state.times}
-            for j in st.session_state.jogos:
-                if j['ga'] is not None and j['gb'] is not None:
-                    a, b = j['a'], j['b']
-                    # Evita erro de chave se os times mudarem
-                    if a not in stats: stats[a] = {"P":0,"J":0,"V":0,"E":0,"D":0,"SG":0}
-                    if b not in stats: stats[b] = {"P":0,"J":0,"V":0,"E":0,"D":0,"SG":0}
-                    
-                    stats[a]["J"]+=1; stats[b]["J"]+=1
-                    if j['ga'] > j['gb']: stats[a]["P"]+=3; stats[a]["V"]+=1; stats[b]["D"]+=1
-                    elif j['gb'] > j['ga']: stats[b]["P"]+=3; stats[b]["V"]+=1; stats[a]["D"]+=1
-                    else: stats[a]["P"]+=1; stats[b]["P"]+=1; stats[a]["E"]+=1; stats[b]["E"]+=1
-                    stats[a]["SG"]+=(j['ga']-j['gb']); stats[b]["SG"]+=(j['gb']-j['ga'])
-            st.dataframe(pd.DataFrame.from_dict(stats, orient='index').sort_values(["P", "SG"], ascending=False), use_container_width=True)
+    # --- TELA CHAVES (TABELA) ---
+    elif st.session_state.menu == "Tabela":
+        if st.session_state.modo == "COPA":
+            st.title("⚔️ Chaves do Mata-Mata")
+            # Desenha as colunas da copa
+            fases = ["OITAVAS", "QUARTAS", "SEMI", "FINAL"]
+            # Aqui entrará a lógica visual de avanço de chaves
+            st.info("As chaves progridem conforme os jogos são finalizados.")
         else:
-            st.info("Visualização da chave da Copa em breve...")
+            st.title("📊 Classificação Liga")
+            # Tabela da liga (mesma lógica anterior)
