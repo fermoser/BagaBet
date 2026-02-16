@@ -2,13 +2,13 @@ import streamlit as st
 import pandas as pd
 from itertools import combinations
 from streamlit_gsheets import GSheetsConnection
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="BAGA GESTOR PRO", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Nomes das abas (Conforme sua planilha)
+# Nomes das abas
 ABA_JOGOS = "Página1" 
 ABA_HISTORICO = "Historico"
 
@@ -65,29 +65,45 @@ df_hist = carregar_dados(ABA_HISTORICO)
 if st.session_state.torneio_ativo is None:
     st.title("⚽ BAGA GESTOR")
     
+    # 1. Hall da Fama
     with st.expander("📜 Hall da Fama (Campeões Anteriores)"):
         if not df_hist.empty:
             st.dataframe(df_hist.sort_index(ascending=False), use_container_width=True)
         else:
             st.info("Nenhum torneio finalizado no histórico ainda.")
 
+    # 2. Torneios para Carregar (Minimizado por padrão)
     torneios = df_db.dropna(subset=['torneio_id'])['torneio_id'].unique() if not df_db.empty else []
     if len(torneios) > 0:
-        st.subheader("📂 Abrir Torneio")
-        cols = st.columns(3)
-        for i, t_nome in enumerate(torneios):
-            fmt_t = df_db[df_db['torneio_id'] == t_nome]['formato'].iloc[0]
-            if cols[i%3].button(f"🏆 {t_nome} ({fmt_t})", key=f"btn_{t_nome}"):
-                st.session_state.torneio_ativo = t_nome
-                st.session_state.formato = fmt_t
-                st.rerun()
+        with st.expander("📂 Carregar Torneio em Aberto", expanded=False):
+            cols = st.columns(3)
+            for i, t_nome in enumerate(torneios):
+                fmt_t = df_db[df_db['torneio_id'] == t_nome]['formato'].iloc[0]
+                if cols[i%3].button(f"🏆 {t_nome} ({fmt_t})", key=f"btn_{t_nome}"):
+                    st.session_state.torneio_ativo = t_nome
+                    st.session_state.formato = fmt_t
+                    st.rerun()
+    
     st.divider()
+    
+    # 3. Novo Torneio (Lógica de Modo Ida e Volta dinâmica)
+    st.subheader("🆕 Novo Torneio")
     with st.form("criar"):
-        st.subheader("🆕 Novo Torneio")
-        c1, c2, c3 = st.columns(3)
-        n, t, m = c1.text_input("Nome"), c2.selectbox("Tipo", ["LIGA", "COPA"]), c3.selectbox("Modo", ["Só Ida", "Ida e Volta"])
+        c1, c2 = st.columns(2)
+        n = c1.text_input("Nome do Torneio")
+        t = c2.selectbox("Tipo", ["COPA", "LIGA"])
+        
+        # Só mostra opção de Ida e Volta se for COPA
+        if t == "COPA":
+            m = st.selectbox("Modo", ["Só Ida", "Ida e Volta"])
+        else:
+            m = "Só Ida" # Liga é sempre ida (pontos corridos)
+            st.caption("ℹ️ Ligas são criadas automaticamente no modo 'Só Ida'.")
+            
         if st.form_submit_button("CRIAR"):
-            if n: st.session_state.torneio_ativo, st.session_state.formato, st.session_state.modo = n, t, m; st.rerun()
+            if n: 
+                st.session_state.torneio_ativo, st.session_state.formato, st.session_state.modo = n, t, m
+                st.rerun()
 
 else:
     tid, fmt = st.session_state.torneio_ativo, st.session_state.formato
@@ -141,7 +157,6 @@ else:
             df_tab = pd.DataFrame.from_dict(stats, orient='index').sort_values(by=['P','V','SG','GP'], ascending=False)
             st.table(df_tab)
         else:
-            # VOLTA DO CHAVEAMENTO VISUAL
             st.subheader("🗺️ Chaveamento")
             f_map = {"Oitavas":0, "Quartas":1, "Semifinal":2, "3º Lugar":3, "Final":4}
             f_p = sorted([f for f in df_t['fase'].unique() if f in f_map], key=lambda x: f_map.get(x, 99))
@@ -161,8 +176,6 @@ else:
     elif menu == "⚙️ Admin":
         if is_admin:
             st.subheader("🏁 Finalizar e Imortalizar Torneio")
-            st.info("Esta ação salva o pódio no Histórico sem apagar os jogos.")
-            
             if st.button("🏆 SALVAR NO HISTÓRICO"):
                 try:
                     camp, vice, terc = "", "", ""
@@ -180,19 +193,21 @@ else:
                         if len(df_res) >= 2: vice = df_res.index[1]
                         if len(df_res) >= 3: terc = df_res.index[2]
                     else:
-                        fin = df_t[df_t['fase'] == 'Final']
-                        t3d = df_t[df_t['fase'] == '3º Lugar']
+                        fin = df_t[df_t['fase'] == 'Final']; t3d = df_t[df_t['fase'] == '3º Lugar']
                         if not fin.empty: camp, vice = obter_vencedor(fin.iloc[0])
                         if not t3d.empty: terc, _ = obter_vencedor(t3d.iloc[0])
 
+                    # AJUSTE DE HORÁRIO (Brasil -3h do servidor padrão)
+                    hora_brasil = datetime.now() - timedelta(hours=3)
+                    
                     nova_linha = pd.DataFrame([{
                         'torneio_id': tid, 'formato': fmt, 'campeao': camp, 'vice': vice, 'terceiro': terc,
-                        'data_fim': datetime.now().strftime("%d/%m/%Y %H:%M")
+                        'data_fim': hora_brasil.strftime("%d/%m/%Y %H:%M")
                     }])
                     
                     df_hist_novo = pd.concat([df_hist, nova_linha], ignore_index=True)
                     conn.update(worksheet=ABA_HISTORICO, data=df_hist_novo)
-                    st.success("Copiado para o Histórico com sucesso!")
+                    st.success("Copiado para o Histórico!")
                     st.balloons()
                     st.rerun()
                 except Exception as e:
