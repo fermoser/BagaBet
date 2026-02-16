@@ -8,7 +8,7 @@ from streamlit_gsheets import GSheetsConnection
 st.set_page_config(page_title="BAGA BET PRO", layout="wide", page_icon="⚽")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- CSS VISUAL (ESTILO CHAVES) ---
+# --- CSS VISUAL ---
 st.markdown("""
     <style>
     .main { background-color: #f0f2f6; }
@@ -18,29 +18,16 @@ st.markdown("""
         border-radius: 12px; padding: 10px; text-align: center;
         box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
     }
-    .gols-finalizado { color: #2e7d32 !important; font-weight: 900; font-size: 2rem; }
+    .gols-finalizado { color: #1b5e20 !important; font-weight: 900; font-size: 2rem; }
     .gols-aberto { color: #666 !important; font-weight: 900; font-size: 2rem; }
-    
-    /* Estilo das Chaves */
-    .bracket-node {
-        background: white; border: 1px solid #ccc; padding: 8px;
-        border-radius: 8px; margin-bottom: 5px; text-align: center;
-        font-weight: bold; min-height: 40px; display: flex; 
-        align-items: center; justify-content: center;
-    }
-    .bracket-title {
-        background: #0e1117; color: white; padding: 5px;
-        border-radius: 5px; text-align: center; margin-bottom: 10px;
+    .fase-header {
+        background: #0e1117; color: white; padding: 10px;
+        border-radius: 8px; margin: 20px 0 10px 0; text-align: center;
     }
     </style>
     """, unsafe_allow_html=True)
 
 # --- FUNÇÕES DE DADOS ---
-def money(v):
-    cor = "#28a745" if v > 0 else "#dc3545" if v < 0 else "#212529"
-    val_fmt = f"R$ {float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f'<span style="color:{cor}; font-weight:bold;">{val_fmt}</span>'
-
 def carregar_tudo():
     df = conn.read(ttl=0)
     if df is None or df.empty: return [], []
@@ -80,24 +67,19 @@ if 'estagio' not in st.session_state: st.session_state.estagio = 'inicio'
 if 'autenticado' not in st.session_state: st.session_state.autenticado = False
 if 'jogos' not in st.session_state: st.session_state.jogos, st.session_state.times = carregar_tudo()
 if 'menu' not in st.session_state: st.session_state.menu = "Jogos"
-if 'modo' not in st.session_state: st.session_state.modo = "LIGA"
+if 'modo' not in st.session_state: st.session_state.modo = "COPA"
 
 # --- TELA INICIAL ---
 if st.session_state.estagio == 'inicio':
     st.markdown("<h1 style='text-align: center;'>⚽ BAGA BET PRO</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
-    
     if c1.button("🏆 NOVO TORNEIO LIGA", use_container_width=True):
         st.session_state.modo = "LIGA"; st.session_state.estagio = 'painel'; st.session_state.menu = "Admin"; st.rerun()
-    
     if c2.button("⚔️ NOVO TORNEIO COPA", use_container_width=True):
         st.session_state.modo = "COPA"; st.session_state.estagio = 'painel'; st.session_state.menu = "Admin"; st.rerun()
-
-    if c3.button("☁️ CARREGAR ÚLTIMO SALVO", type="primary", use_container_width=True):
+    if c3.button("☁️ CARREGAR SALVO", type="primary", use_container_width=True):
         st.session_state.jogos, st.session_state.times = carregar_tudo()
-        # Tenta detectar modo pela fase do primeiro jogo
-        if st.session_state.jogos:
-            st.session_state.modo = "COPA" if st.session_state.jogos[0]['fase'] != "LIGA" else "LIGA"
+        if st.session_state.jogos: st.session_state.modo = "COPA" if st.session_state.jogos[0]['fase'] != "LIGA" else "LIGA"
         st.session_state.estagio = 'painel'; st.rerun()
 
 else:
@@ -121,146 +103,120 @@ else:
     if st.session_state.menu == "Admin":
         if st.session_state.autenticado:
             st.title("⚙️ Painel do Organizador")
-            
-            # Botão Sync (RESTORED)
-            if st.button("🔄 ATUALIZAR NUVEM (FORÇAR SYNC)"):
-                st.session_state.jogos, st.session_state.times = carregar_tudo()
-                st.rerun()
+            if st.button("🔄 ATUALIZAR NUVEM (Sync)"):
+                st.session_state.jogos, st.session_state.times = carregar_tudo(); st.rerun()
 
             st.divider()
-
             if st.session_state.modo == "COPA":
-                st.subheader("⚔️ Configurar Chaves do Mata-Mata")
-                qtd = st.number_input("Número de Equipes (Sempre Par)", 2, 16, 4, step=2)
-                
-                nomes_copa = []
+                st.subheader("⚔️ Iniciar Novo Mata-Mata")
+                qtd = st.number_input("Número de Equipes", 2, 16, 4, step=2)
+                nomes = []
                 cols = st.columns(2)
                 for i in range(qtd):
-                    # Memória de nomes se já existir
-                    val_mem = st.session_state.times[i] if i < len(st.session_state.times) else ""
-                    n = cols[i%2].text_input(f"Equipe {i+1}", value=val_mem, key=f"cp{i}")
-                    nomes_copa.append(n)
+                    n = cols[i%2].text_input(f"Equipe {i+1}", key=f"cp{i}")
+                    nomes.append(n)
                 
-                if st.button("🚀 INICIAR COPA (LIMPAR ANTERIOR)", type="primary"):
-                    equipes = [n.strip() for n in nomes_copa if n.strip()]
+                if st.button("🚀 GERAR PRIMEIRA FASE", type="primary"):
+                    equipes = [n.strip() for n in nomes if n.strip()]
                     if len(equipes) == qtd:
                         random.shuffle(equipes)
-                        novos = []
-                        fase_inicial = "QUARTAS" if qtd > 4 else "SEMI" if qtd > 2 else "FINAL"
-                        for j in range(0, len(equipes), 2):
-                            novos.append({"a": equipes[j], "b": equipes[j+1], "ga": None, "gb": None, 
-                                          "finalizado": False, "apostas": [], "fase": fase_inicial, "pen_a": 0, "pen_b": 0})
-                        st.session_state.jogos = novos
-                        st.session_state.times = equipes
-                        salvar_tudo(novos)
-                        st.success("Copa Gerada!")
-                        st.rerun()
-            
-            # --- Lógica de Avanço de Fase (Manual) ---
+                        fase_ini = "QUARTAS" if qtd > 4 else "SEMI" if qtd > 2 else "FINAL"
+                        novos = [{"a": equipes[j], "b": equipes[j+1], "ga": None, "gb": None, "finalizado": False, "apostas": [], "fase": fase_ini, "pen_a": 0, "pen_b": 0} for j in range(0, len(equipes), 2)]
+                        st.session_state.jogos = novos; salvar_tudo(novos); st.rerun()
+
+            # --- BOTÃO DE AVANÇO (MANUAL) ---
             if st.session_state.modo == "COPA" and st.session_state.jogos:
-                st.divider()
-                st.subheader("🏁 Avançar Vencedores")
+                fases_ordem = ["QUARTAS", "SEMI", "FINAL"]
                 fase_atual = st.session_state.jogos[-1]['fase']
                 jogos_fase = [j for j in st.session_state.jogos if j['fase'] == fase_atual]
                 
                 if all(j['finalizado'] for j in jogos_fase) and fase_atual != "FINAL":
-                    if st.button(f"CONFIRMAR VENCEDORES DA {fase_atual} ➡️ PRÓXIMA FASE"):
+                    st.divider()
+                    st.success(f"Todos os jogos da {fase_atual} foram finalizados!")
+                    if st.button(f"➡️ GERAR CONFRONTOS DA PRÓXIMA FASE", use_container_width=True):
                         vencedores = []
                         for j in jogos_fase:
-                            # Decide vencedor (Gols ou Pênaltis)
                             if j['ga'] > j['gb']: vencedores.append(j['a'])
                             elif j['gb'] > j['ga']: vencedores.append(j['b'])
                             else: vencedores.append(j['a'] if j['pen_a'] > j['pen_b'] else j['b'])
                         
-                        proxima = "SEMI" if fase_atual == "QUARTAS" else "FINAL"
-                        novos_confrontos = []
-                        for i in range(0, len(vencedores), 2):
-                            novos_confrontos.append({"a": vencedores[i], "b": vencedores[i+1], "ga": None, "gb": None, 
-                                                     "finalizado": False, "apostas": [], "fase": proxima, "pen_a": 0, "pen_b": 0})
-                        
+                        prox_fase = fases_ordem[fases_ordem.index(fase_atual) + 1]
+                        novos_confrontos = [{"a": vencedores[i], "b": vencedores[i+1], "ga": None, "gb": None, "finalizado": False, "apostas": [], "fase": prox_fase, "pen_a": 0, "pen_b": 0} for i in range(0, len(vencedores), 2)]
                         st.session_state.jogos.extend(novos_confrontos)
                         salvar_tudo(st.session_state.jogos)
                         st.rerun()
 
-        else: st.error("Acesso restrito.")
-
     # --- ABA JOGOS ---
     elif st.session_state.menu == "Jogos":
-        st.title("🏟️ Partidas em Andamento")
-        for i, j in enumerate(st.session_state.jogos):
-            with st.container(border=True):
-                st.caption(f"Fase: {j['fase']}")
-                c1, c2, c3 = st.columns([2, 1, 2])
-                ga = j['ga'] if j['ga'] is not None else "-"
-                gb = j['gb'] if j['gb'] is not None else "-"
-                cls = "gols-finalizado" if j['finalizado'] else "gols-aberto"
+        if not st.session_state.jogos:
+            st.info("Nenhum jogo criado.")
+        else:
+            # Agrupar por fase
+            fases_no_app = []
+            for j in st.session_state.jogos:
+                if j['fase'] not in fases_no_app: fases_no_app.append(j['fase'])
+            
+            for f in fases_no_app:
+                st.markdown(f"<div class='fase-header'>{f}</div>", unsafe_allow_html=True)
+                jogos_f = [j for j in st.session_state.jogos if j['fase'] == f]
                 
-                c1.markdown(f"<h3 style='text-align:right;'>{j['a']}</h3>", unsafe_allow_html=True)
-                c2.markdown(f"<div class='placar-box'><span class='{cls}'>{ga} : {gb}</span></div>", unsafe_allow_html=True)
-                c3.markdown(f"<h3 style='text-align:left;'>{j['b']}</h3>", unsafe_allow_html=True)
+                for i, j in enumerate(st.session_state.jogos):
+                    if j['fase'] == f:
+                        with st.container(border=True):
+                            c1, c2, c3 = st.columns([2, 1, 2])
+                            ga, gb = (j['ga'] if j['ga'] is not None else "-"), (j['gb'] if j['gb'] is not None else "-")
+                            
+                            c1.markdown(f"<h3 style='text-align:right;'>{j['a']}</h3>", unsafe_allow_html=True)
+                            c2.markdown(f"<div class='placar-box'><span class='{'gols-finalizado' if j['finalizado'] else 'gols-aberto'}'>{ga} : {gb}</span></div>", unsafe_allow_html=True)
+                            c3.markdown(f"<h3 style='text-align:left;'>{j['b']}</h3>", unsafe_allow_html=True)
 
-                if j['finalizado'] and (j['pen_a'] > 0 or j['pen_b'] > 0):
-                    st.markdown(f"<p style='text-align:center;'>Pênaltis: **{j['pen_a']} x {j['pen_b']}**</p>", unsafe_allow_html=True)
+                            if j['finalizado'] and (j['pen_a'] > 0 or j['pen_b'] > 0):
+                                st.markdown(f"<p style='text-align:center;'>Pênaltis: **{j['pen_a']} x {j['pen_b']}**</p>", unsafe_allow_html=True)
 
-                if st.session_state.autenticado:
-                    with st.expander("Lançar Resultado"):
-                        l1, l2 = st.columns(2)
-                        vga = l1.number_input(f"Gols {j['a']}", 0, 20, value=0, step=1, key=f"ga{i}")
-                        vgb = l2.number_input(f"Gols {j['b']}", 0, 20, value=0, step=1, key=f"gb{i}")
-                        pa, pb = 0, 0
-                        if vga == vgb and st.session_state.modo == "COPA":
-                            st.warning("Empate em Mata-Mata! Informe os Pênaltis:")
-                            p1, p2 = st.columns(2)
-                            pa = p1.number_input("Pên. A", 0, 20, step=1, key=f"pa{i}")
-                            pb = p2.number_input("Pên. B", 0, 20, step=1, key=f"pb{i}")
-                        
-                        if st.button("SALVAR PLACAR", key=f"btn{i}"):
-                            st.session_state.jogos[i].update({'ga': vga, 'gb': vgb, 'finalizado': True, 'pen_a': pa, 'pen_b': pb})
-                            salvar_tudo(st.session_state.jogos); st.rerun()
+                            if st.session_state.autenticado:
+                                with st.expander("Lançar Placar"):
+                                    l1, l2 = st.columns(2)
+                                    vga = l1.number_input(f"Gols {j['a']}", 0, 20, step=1, key=f"ga{f}{i}")
+                                    vgb = l2.number_input(f"Gols {j['b']}", 0, 20, step=1, key=f"gb{f}{i}")
+                                    pa, pb = 0, 0
+                                    if vga == vgb and st.session_state.modo == "COPA":
+                                        p1, p2 = st.columns(2)
+                                        pa = p1.number_input("Pên. A", 0, 20, step=1, key=f"pa{f}{i}")
+                                        pb = p2.number_input("Pên. B", 0, 20, step=1, key=f"pb{f}{i}")
+                                    if st.button("SALVAR", key=f"btn{f}{i}"):
+                                        j.update({'ga': vga, 'gb': vgb, 'finalizado': True, 'pen_a': pa, 'pen_b': pb})
+                                        salvar_tudo(st.session_state.jogos); st.rerun()
 
-                # --- APOSTAS (STEP 1) ---
-                tabs = st.tabs(["Apostas", "Nova Aposta"])
-                with tabs[1]:
-                    if not j['finalizado'] and st.session_state.autenticado:
-                        with st.form(f"f{i}", clear_on_submit=True):
-                            n = st.text_input("Nome")
-                            v = st.number_input("Valor R$", 1, 5000, 10, step=1)
-                            o = st.radio("Palpite", [j['a'], "Empate", j['b']], horizontal=True)
-                            if st.form_submit_button("Confirmar"):
-                                code = "A" if o==j['a'] else "B" if o==j['b'] else "E"
-                                st.session_state.jogos[i]['apostas'].append({"nome": n, "valor": v, "opcao": code})
-                                salvar_tudo(st.session_state.jogos); st.rerun()
+                            # Apostas Step=1
+                            t1, t2 = st.tabs(["Ver Apostas", "Nova Aposta"])
+                            with t2:
+                                if not j['finalizado'] and st.session_state.autenticado:
+                                    with st.form(f"form{f}{i}", clear_on_submit=True):
+                                        n = st.text_input("Nome")
+                                        v = st.number_input("Valor R$", 1, 5000, 10, step=1)
+                                        o = st.radio("Palpite", [j['a'], "Empate", j['b']], horizontal=True)
+                                        if st.form_submit_button("Confirmar"):
+                                            cod = "A" if o==j['a'] else "B" if o==j['b'] else "E"
+                                            j['apostas'].append({"nome": n, "valor": v, "opcao": cod})
+                                            salvar_tudo(st.session_state.jogos); st.rerun()
 
     # --- ABA TABELA / CHAVES ---
     elif st.session_state.menu == "Tabela":
         if st.session_state.modo == "COPA":
             st.title("⚔️ Chaves do Torneio")
-            fases_disponiveis = ["QUARTAS", "SEMI", "FINAL"]
-            cols_f = st.columns(len(fases_disponiveis))
-            
-            for idx, fase in enumerate(fases_disponiveis):
-                with cols_f[idx]:
-                    st.markdown(f"<div class='bracket-title'>{fase}</div>", unsafe_allow_html=True)
+            fases_visual = ["QUARTAS", "SEMI", "FINAL"]
+            cols = st.columns(len(fases_visual))
+            for idx, fase in enumerate(fases_visual):
+                with cols[idx]:
+                    st.markdown(f"<div class='fase-header' style='background:#1f4e79;'>{fase}</div>", unsafe_allow_html=True)
                     jogos_f = [jog for jog in st.session_state.jogos if jog['fase'] == fase]
-                    if not jogos_f:
-                        st.markdown("<div class='bracket-node' style='color:#ccc;'>Aguardando...</div>", unsafe_allow_html=True)
                     for jf in jogos_f:
-                        cor_a = "color:#2e7d32;" if jf['finalizado'] and (jf['ga'] > jf['gb'] or jf['pen_a'] > jf['pen_b']) else ""
-                        cor_b = "color:#2e7d32;" if jf['finalizado'] and (jf['gb'] > jf['ga'] or jf['pen_b'] > jf['pen_a']) else ""
+                        venc_a = "border: 2px solid #2e7d32; background:#e8f5e9;" if jf['finalizado'] and (jf['ga'] > jf['gb'] or jf['pen_a'] > jf['pen_b']) else "background:white;"
+                        venc_b = "border: 2px solid #2e7d32; background:#e8f5e9;" if jf['finalizado'] and (jf['gb'] > jf['ga'] or jf['pen_b'] > jf['pen_a']) else "background:white;"
                         st.markdown(f"""
-                            <div style='border: 1px solid #ddd; padding: 5px; border-radius: 5px; margin-bottom: 10px; background: white;'>
-                                <div style='{cor_a}'>{jf['a']} ({jf['ga'] if jf['ga'] is not None else ""})</div>
-                                <div style='border-top: 1px dashed #eee; margin: 3px 0;'></div>
-                                <div style='{cor_b}'>{jf['b']} ({jf['gb'] if jf['gb'] is not None else ""})</div>
+                            <div style='border:1px solid #ccc; border-radius:10px; padding:8px; margin-bottom:15px; background:#f9f9f9;'>
+                                <div style='padding:5px; border-radius:5px; {venc_a}'>{jf['a']} <span style='float:right;'>{jf['ga'] if jf['ga'] is not None else ""}</span></div>
+                                <div style='height:5px;'></div>
+                                <div style='padding:5px; border-radius:5px; {venc_b}'>{jf['b']} <span style='float:right;'>{jf['gb'] if jf['gb'] is not None else ""}</span></div>
                             </div>
                         """, unsafe_allow_html=True)
-        else:
-            st.title("📊 Classificação Liga")
-            # Tabela da Liga Simplificada
-            stats = {t: {"P":0, "V":0} for t in st.session_state.times}
-            for j in st.session_state.jogos:
-                if j['finalizado']:
-                    if j['ga'] > j['gb']: stats[j['a']]["P"]+=3; stats[j['a']]["V"]+=1
-                    elif j['gb'] > j['ga']: stats[j['b']]["P"]+=3; stats[j['b']]["V"]+=1
-                    else: stats[j['a']]["P"]+=1; stats[j['b']]["P"]+=1
-            st.table(pd.DataFrame(stats).T.sort_values("P", ascending=False))
