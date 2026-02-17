@@ -7,13 +7,46 @@ from datetime import datetime, timedelta
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="BAGA GESTOR PRO", layout="wide")
 
-# --- ESTILO CSS ---
+# --- ESTILO CSS MODERNO ---
 st.markdown("""
     <style>
     input[type=number] { color: #F4D03F !important; font-weight: bold !important; font-size: 20px !important; }
     .stMarkdown div[style*="background:#eee"] { background-color: #333 !important; color: #F4D03F !important; font-weight: bold; border-radius: 5px; }
     [data-testid="stForm"] .stColumn { display: flex; align-items: center; justify-content: center; }
-    button[kind="secondary"] { border: 2px solid #F4D03F !important; }
+    
+    /* Estilos para o Chaveamento */
+    .match-card {
+        background-color: #1E1E1E;
+        border-radius: 10px;
+        padding: 10px;
+        margin-bottom: 15px;
+        border: 2px solid #333;
+        color: white;
+        box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
+    }
+    .winner-card {
+        border: 2px solid #28a745 !important;
+        box-shadow: 0 0 10px #28a745;
+    }
+    .team-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 5px 0;
+        font-size: 14px;
+    }
+    .score-box {
+        background: #F4D03F;
+        color: black;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: bold;
+    }
+    .winner-label {
+        color: #28a745;
+        font-size: 10px;
+        font-weight: bold;
+        text-transform: uppercase;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -86,12 +119,9 @@ if st.session_state.torneio_ativo is None:
 
     st.divider()
     st.subheader("🆕 Criar Novo")
-    
     col_l, col_c = st.columns(2)
-    
     with col_l.container(border=True):
         st.markdown("### 🏆 MODO LIGA")
-        st.caption("Todos contra todos (Pontos Corridos)")
         nome_liga = st.text_input("Nome da Liga", key="n_liga")
         if st.button("CRIAR LIGA", use_container_width=True):
             if nome_liga:
@@ -102,7 +132,6 @@ if st.session_state.torneio_ativo is None:
 
     with col_c.container(border=True):
         st.markdown("### ⚔️ MODO COPA")
-        st.caption("Chaveamento Mata-Mata")
         nome_copa = st.text_input("Nome da Copa", key="n_copa")
         modo_copa = st.selectbox("Formato da Copa", ["Só Ida", "Ida e Volta"])
         if st.button("CRIAR COPA", use_container_width=True):
@@ -126,51 +155,38 @@ else:
         if st.button("🏠 Sair"): st.session_state.torneio_ativo = None; st.rerun()
 
     if menu == "🏟️ Jogos":
-        if df_t['a'].isnull().all():
-            st.info("Acesse 'Admin' para gerar os jogos.")
+        if df_t['a'].isnull().all(): st.info("Acesse 'Admin' para gerar os jogos.")
         else:
             for f in sorted(df_t['fase'].dropna().unique(), key=lambda x: ORDEM_FASES.get(x, 99)):
                 st.subheader(f"📍 {f}")
                 for idx, r in df_t[df_t['fase'] == f].iterrows():
                     with st.container(border=True):
                         c1, c2, c3 = st.columns([2,1,2])
-                        if fmt == "LIGA" or r['modo_copa'] == "Só Ida":
-                            p_txt = f"{r['gols_a']} x {r['gols_b']}"
-                        else:
-                            p_txt = f"({r['ida_a']}) {r['volta_a']} x {r['volta_b']} ({r['ida_b']})"
-                        if is_done(r['finalizado']) and (int(r['pen_a'])+int(r['pen_b'])>0):
-                            p_txt += f" (P: {r['pen_a']}x{r['pen_b']})"
-                        
+                        p_txt = f"{r['gols_a']} x {r['gols_b']}" if fmt == "LIGA" or r['modo_copa'] == "Só Ida" else f"({r['ida_a']}) {r['volta_a']} x {r['volta_b']} ({r['ida_b']})"
+                        if is_done(r['finalizado']) and (int(r['pen_a'])+int(r['pen_b'])>0): p_txt += f" (P: {r['pen_a']}x{r['pen_b']})"
                         c1.markdown(f"<p style='text-align:right'><b>{r['a']}</b></p>", unsafe_allow_html=True)
                         c2.markdown(f"<div style='text-align:center; background:#eee; padding:5px; color:black;'>{p_txt}</div>", unsafe_allow_html=True)
                         c3.markdown(f"<p style='text-align:left'><b>{r['b']}</b></p>", unsafe_allow_html=True)
-                        
                         if is_admin:
                             with st.expander("✎ Editar Placar"):
                                 with st.form(f"f_{idx}"):
                                     if fmt == "LIGA" or r['modo_copa'] == "Só Ida":
                                         ca, cb = st.columns(2)
-                                        ga = ca.number_input(f"Gols {r['a']}", 0, 99, int(r['gols_a']), key=f"ga_{idx}")
-                                        gb = cb.number_input(f"Gols {r['b']}", 0, 99, int(r['gols_b']), key=f"gb_{idx}")
+                                        ga, gb = ca.number_input(f"Gols {r['a']}",0,99,int(r['gols_a'])), cb.number_input(f"Gols {r['b']}",0,99,int(r['gols_b']))
                                         res, tot_a, tot_b = [ga, gb, ga, gb, 0, 0], ga, gb
                                     else:
                                         with st.expander("⚽ IDA", expanded=True):
                                             cia, cib = st.columns(2)
-                                            ia = cia.number_input(f"Gols {r['a']}", 0, 99, int(r['ida_a']), key=f"ia_{idx}")
-                                            ib = cib.number_input(f"Gols {r['b']}", 0, 99, int(r['ida_b']), key=f"ib_{idx}")
+                                            ia, ib = cia.number_input(f"Gols {r['a']}",0,99,int(r['ida_a'])), cib.number_input(f"Gols {r['b']}",0,99,int(r['ida_b']))
                                         with st.expander("⚽ VOLTA", expanded=True):
                                             cva, cvb = st.columns(2)
-                                            va = cva.number_input(f"Gols {r['a']}", 0, 99, int(r['volta_a']), key=f"va_{idx}")
-                                            vb = cvb.number_input(f"Gols {r['b']}", 0, 99, int(r['volta_b']), key=f"vb_{idx}")
+                                            va, vb = cva.number_input(f"Gols {r['a']}",0,99,int(r['volta_a'])), cvb.number_input(f"Gols {r['b']}",0,99,int(r['volta_b']))
                                         res, tot_a, tot_b = [ia+va, ib+vb, ia, ib, va, vb], (ia+va), (ib+vb)
-
                                     pa, pb = 0, 0
                                     if fmt == "COPA" and tot_a == tot_b and r['a'] != "BYE" and r['b'] != "BYE":
                                         with st.expander("🎯 PÊNALTIS", expanded=True):
                                             cpa, cpb = st.columns(2)
-                                            pa = cpa.number_input(f"Pênaltis {r['a']}", 0, 99, int(r['pen_a']), key=f"pa_{idx}")
-                                            pb = cpb.number_input(f"Pênaltis {r['b']}", 0, 99, int(r['pen_b']), key=f"pb_{idx}")
-
+                                            pa, pb = cpa.number_input(f"Pênaltis {r['a']}",0,99,int(r['pen_a'])), cpb.number_input(f"Pênaltis {r['b']}",0,99,int(r['pen_b']))
                                     if st.form_submit_button("SALVAR"):
                                         df_db.loc[idx, ['gols_a','gols_b','ida_a','ida_b','volta_a','volta_b','pen_a','pen_b','finalizado']] = res + [pa, pb, "SIM"]
                                         if fmt == "COPA":
@@ -207,11 +223,32 @@ else:
             cols = st.columns(len(f_p))
             for i, fn in enumerate(f_p):
                 with cols[i]:
-                    st.markdown(f"**{fn.upper()}**")
+                    st.markdown(f"#### {fn.upper()}")
                     for _, r in df_t[df_t['fase'] == fn].iterrows():
-                        vw, _ = obter_vencedor_perdedor(r)
-                        b_c = "#F4D03F" if is_done(r['finalizado']) else "#ccc"
-                        st.markdown(f'<div style="border:2px solid {b_c}; padding:5px; border-radius:5px; background:white; color:black; margin-bottom:5px; text-align:center; font-size:11px;">{r["a"]} x {r["b"]}<br><b>V: {vw if vw else "-"}</b></div>', unsafe_allow_html=True)
+                        v_win, _ = obter_vencedor_perdedor(r)
+                        done = is_done(r['finalizado'])
+                        
+                        # Definição dos placares para o card
+                        if r['modo_copa'] == "Só Ida":
+                            sc_a, sc_b = int(r['gols_a']), int(r['gols_b'])
+                        else:
+                            sc_a, sc_b = int(r['ida_a']) + int(r['volta_a']), int(r['ida_b']) + int(r['volta_b'])
+                        
+                        # Card HTML dinâmico
+                        card_class = "match-card winner-card" if done else "match-card"
+                        st.markdown(f"""
+                        <div class="{card_class}">
+                            <div class="team-row">
+                                <span style="{'color:#28a745; font-weight:bold;' if v_win == r['a'] else ''}">{r['a']}</span>
+                                <span class="score-box">{sc_a}</span>
+                            </div>
+                            <div class="team-row">
+                                <span style="{'color:#28a745; font-weight:bold;' if v_win == r['b'] else ''}">{r['b']}</span>
+                                <span class="score-box">{sc_b}</span>
+                            </div>
+                            {f'<div class="winner-label">🏆 {v_win}</div>' if v_win else ''}
+                        </div>
+                        """, unsafe_allow_html=True)
 
     elif menu == "⚙️ Admin" and is_admin:
         if df_t['a'].isnull().all():
@@ -221,17 +258,16 @@ else:
                 if len(times)>=2:
                     jogos = []
                     if fmt == "LIGA":
-                        for a, b in combinations(times, 2):
-                            jogos.append({'torneio_id':tid,'formato':'LIGA','fase':'Liga','a':a,'b':b,'modo_copa':'Só Ida','finalizado':'NÃO'})
+                        for a, b in combinations(times, 2): jogos.append({'torneio_id':tid,'formato':'LIGA','fase':'Liga','a':a,'b':b,'modo_copa':'Só Ida','finalizado':'NÃO'})
                     else:
                         f_ini = "Semifinal" if len(times)<=4 else "Quartas"
                         for i in range(0, len(times), 2):
                             t1, t2 = times[i], (times[i+1] if i+1 < len(times) else "BYE")
                             jogos.append({'torneio_id':tid,'formato':'COPA','fase':f_ini,'a':t1,'b':t2,'modo_copa':modo_fixo,'finalizado':'NÃO'})
-                    df_final = pd.concat([df_db[~((df_db['torneio_id'] == tid) & (df_db['a'].isnull()))], pd.DataFrame(jogos)], ignore_index=True)
-                    salvar_dados(df_final, ABA_JOGOS); st.rerun()
+                    salvar_dados(pd.concat([df_db[~((df_db['torneio_id'] == tid) & (df_db['a'].isnull()))], pd.DataFrame(jogos)], ignore_index=True), ABA_JOGOS); st.rerun()
         else:
-            if st.button("🏆 ENCERRAR (HALL DA FAMA)"):
+            if st.button("🏆 ENCERRAR E GERAR PÓDIO"):
+                st.balloons()
                 h_br = (datetime.utcnow() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
                 c, v, t = "---", "---", "---"
                 if fmt == "COPA":
@@ -251,6 +287,16 @@ else:
                             stt[t1]['SG'] = stt[t1]['GP'] - g2; stt[t2]['SG'] = stt[t2]['GP'] - g1
                     res_l = pd.DataFrame.from_dict(stt, orient='index').sort_values(by=['P','V','SG','GP'], ascending=False).index.tolist()
                     if len(res_l) >= 1: c = res_l[0]; v = res_l[1] if len(res_l)>1 else "---"; t = res_l[2] if len(res_l)>2 else "---"
-                salvar_dados(pd.concat([df_hist, pd.DataFrame([{'torneio_id':tid,'formato':fmt,'campeao':c,'vice':v,'terceiro':t,'data_fim':h_br}])], ignore_index=True), ABA_HISTORICO); st.rerun()
+                
+                # Exibição do Pódio Visual
+                st.markdown("## 🥇 RESULTADO FINAL")
+                p1, p2, p3 = st.columns(3)
+                p1.success(f"🥇 CAMPEÃO: **{c}**")
+                p2.warning(f"🥈 VICE: **{v}**")
+                p3.info(f"🥉 3º LUGAR: **{t}**")
+                
+                salvar_dados(pd.concat([df_hist, pd.DataFrame([{'torneio_id':tid,'formato':fmt,'campeao':c,'vice':v,'terceiro':t,'data_fim':h_br}])], ignore_index=True), ABA_HISTORICO)
+                st.toast("Torneio Finalizado com Sucesso!", icon="🏆")
+
             if st.button("🚨 EXCLUIR TORNEIO"):
                 salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
