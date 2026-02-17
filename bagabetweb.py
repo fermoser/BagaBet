@@ -10,38 +10,28 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 ABA_JOGOS = "Página1" 
 ABA_SUICO = "Suico"
 
-# ESTRUTURA IMUTÁVEL (Para o Google Sheets não apagar colunas)
+# Colunas que o sistema vai "forçar" a existir
 COLS_SUICO = ['torneio_id', 'formato', 'fase', 'rodada', 'a', 'b', 'gols_a', 'gols_b', 'finalizado']
 
-# --- FUNÇÕES DE DADOS ---
 def carregar_dados(aba):
     try:
         df = conn.read(worksheet=aba, ttl="0s")
-        if df is None or df.empty:
-            return pd.DataFrame(columns=COLS_SUICO)
+        if df is None or df.empty: return pd.DataFrame(columns=COLS_SUICO)
         df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
-        # Garante que todas as colunas existam ao ler
-        if aba == ABA_SUICO:
-            for col in COLS_SUICO:
-                if col not in df.columns: df[col] = "-"
-        return df.dropna(how='all')
-    except:
-        return pd.DataFrame(columns=COLS_SUICO)
+        for col in COLS_SUICO:
+            if col not in df.columns: df[col] = None
+        return df
+    except: return pd.DataFrame(columns=COLS_SUICO)
 
 def salvar_dados(df, aba):
     if aba == ABA_SUICO:
-        # Força o DataFrame a ter exatamente as 9 colunas antes de subir
         for col in COLS_SUICO:
-            if col not in df.columns: df[col] = "-"
-        df = df[COLS_SUICO] 
-    
-    if 'torneio_id' in df.columns:
-        df = df.dropna(subset=['torneio_id'])
-    
+            if col not in df.columns: df[col] = None
+        df = df[COLS_SUICO]
     conn.update(worksheet=aba, data=df)
     st.cache_data.clear()
 
-# --- INICIALIZAÇÃO ---
+# --- ESTADO ---
 if 'torneio_ativo' not in st.session_state: st.session_state.torneio_ativo = None
 if 'tipo_ativo' not in st.session_state: st.session_state.tipo_ativo = None 
 
@@ -52,29 +42,25 @@ df_padrao = carregar_dados(ABA_JOGOS)
 if st.session_state.torneio_ativo is None:
     st.title("⚽ BAGA GESTOR PRO")
     
-    # Lista unificada de torneios
-    ids_s = [str(x) for x in df_suico['torneio_id'].dropna().unique() if str(x) != "-"]
-    ids_p = [str(x) for x in df_padrao['torneio_id'].dropna().unique() if str(x) != "-"]
-    all_t = sorted(list(set(ids_s + ids_p)))
+    # IDs únicos para não repetir botões
+    ids_s = df_suico['torneio_id'].dropna().unique().tolist()
+    ids_p = df_padrao['torneio_id'].dropna().unique().tolist()
     
-    if all_t:
-        st.subheader("📂 Meus Torneios")
-        cols = st.columns(3)
-        for i, t in enumerate(all_t):
-            icone = "⭐ " if t in ids_s else "🏆 "
-            if cols[i%3].button(icone + t, key=f"t_{t}", use_container_width=True):
-                st.session_state.torneio_ativo = t
-                st.session_state.tipo_ativo = "SUICO" if t in ids_s else "PADRAO"
-                st.rerun()
+    st.subheader("📂 Torneios")
+    for t in sorted(list(set(ids_s + ids_p))):
+        if str(t).strip() in ["", "-", "None"]: continue
+        tipo = "SUICO" if t in ids_s else "PADRAO"
+        if st.button(f"{'⭐' if tipo=='SUICO' else '🏆'} {t}", key=f"btn_{t}"):
+            st.session_state.torneio_ativo = t
+            st.session_state.tipo_ativo = tipo
+            st.rerun()
 
     st.divider()
-    st.subheader("🆕 Criar Novo Suíço")
-    ns = st.text_input("Nome do Torneio")
-    if st.button("CRIAR"):
+    ns = st.text_input("Nome do Novo Suíço")
+    if st.button("CRIAR SUÍÇO"):
         if ns:
-            # Cria a linha inicial preenchendo TODAS as colunas com "-" para não bugar
-            nova_linha = pd.DataFrame([[ns, 'SUICO', 'Inscricao', 0, '-', '-', 0, 0, 'NÃO']], columns=COLS_SUICO)
-            salvar_dados(pd.concat([df_suico, nova_linha]), ABA_SUICO)
+            nova = pd.DataFrame([[ns, 'SUICO', 'Inscricao', 0, '', '', 0, 0, 'NÃO']], columns=COLS_SUICO)
+            salvar_dados(pd.concat([df_suico, nova]), ABA_SUICO)
             st.rerun()
 
 else:
@@ -87,48 +73,46 @@ else:
         if st.button("🏠 Sair"): st.session_state.torneio_ativo = None; st.rerun()
 
     if tipo == "SUICO":
-        df_t = df_suico[df_suico['torneio_id'] == tid].copy()
-        
         if menu == "⚙️ Admin":
-            st.subheader("🔐 Painel de Controle")
+            st.subheader("⚙️ Painel Admin")
             senha = st.text_input("Senha", type="password")
             if senha == "123":
-                st.success("Acesso Liberado")
+                st.success("Acesso Liberado!")
                 
-                # Sorteio (Aparece se não houver jogos reais ou se estiver em 'Inscricao')
-                with st.expander("📝 Gerar 1ª Rodada", expanded=True):
-                    txt = st.text_area("Times (um por linha)")
-                    if st.button("SORTEAR"):
-                        times = [x.strip() for x in txt.split('\n') if x.strip()]
-                        if len(times) >= 6:
-                            random.shuffle(times)
-                            novos = []
-                            for i in range(0, len(times), 2):
-                                t1 = times[i]
-                                t2 = times[i+1] if i+1 < len(times) else "BYE"
-                                novos.append({'torneio_id':tid, 'formato':'SUICO', 'fase':'Suico', 'rodada':1, 'a':t1, 'b':t2, 'gols_a':(1 if t2=='BYE' else 0), 'gols_b':0, 'finalizado':('SIM' if t2=='BYE' else 'NÃO')})
-                            
-                            # Limpa o torneio atual e salva a nova rodada
-                            df_limpo = df_suico[df_suico['torneio_id'] != tid]
-                            salvar_dados(pd.concat([df_limpo, pd.DataFrame(novos)]), ABA_SUICO)
-                            st.rerun()
+                # AQUI ESTÁ A MUDANÇA: A caixa de times SEMPRE aparece no Admin
+                st.markdown("---")
+                st.subheader("📝 Registrar Times / Iniciar Torneio")
+                txt = st.text_area("Cole os times aqui (um por linha):", height=200)
                 
-                if st.button("🚨 EXCLUIR TUDO"):
+                if st.button("🚀 GERAR 1ª RODADA"):
+                    times = [x.strip() for x in txt.split('\n') if x.strip()]
+                    if len(times) >= 6:
+                        random.shuffle(times)
+                        jogos = []
+                        for i in range(0, len(times), 2):
+                            t1 = times[i]
+                            t2 = times[i+1] if i+1 < len(times) else "BYE"
+                            jogos.append({'torneio_id':tid, 'formato':'SUICO', 'fase':'Suico', 'rodada':1, 'a':t1, 'b':t2, 'gols_a':0, 'gols_b':0, 'finalizado':'NÃO'})
+                        
+                        # Remove rascunhos e salva os novos jogos
+                        df_suico = df_suico[df_suico['torneio_id'] != tid]
+                        salvar_dados(pd.concat([df_suico, pd.DataFrame(jogos)]), ABA_SUICO)
+                        st.success("Torneio Iniciado!")
+                        st.rerun()
+                    else:
+                        st.error("Mínimo de 6 times!")
+                
+                if st.button("🚨 EXCLUIR ESTE TORNEIO"):
                     salvar_dados(df_suico[df_suico['torneio_id'] != tid], ABA_SUICO)
                     st.session_state.torneio_ativo = None; st.rerun()
 
         elif menu == "🏟️ Jogos":
+            df_t = df_suico[df_suico['torneio_id'] == tid]
             jogos = df_t[df_t['fase'] == 'Suico']
             if jogos.empty:
-                st.info("Aguardando sorteio no menu Admin.")
+                st.info("Vá em Admin e gere os jogos.")
             else:
                 for idx, r in jogos.iterrows():
-                    with st.container(border=True):
-                        c1, c2, c3 = st.columns([2,1,2])
-                        c1.write(f"**{r['a']}**")
-                        c2.write(f"{r['gols_a']} x {r['gols_b']}")
-                        c3.write(f"**{r['b']}**")
-                        # (Aqui entraria o formulário de placar, mantido simples para teste)
-
+                    st.write(f"{r['a']} vs {r['b']}")
     else:
-        st.write("Modo Liga/Copa - Suas funções originais devem ser coladas aqui.")
+        st.write("Modo Liga/Copa - (Coloque seu código aqui)")
