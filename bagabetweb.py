@@ -10,7 +10,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 ABA_JOGOS = "Página1" 
 ABA_SUICO = "Suico"
 
-# Colunas que o sistema vai "forçar" a existir
+# Colunas padrão
 COLS_SUICO = ['torneio_id', 'formato', 'fase', 'rodada', 'a', 'b', 'gols_a', 'gols_b', 'finalizado']
 
 def carregar_dados(aba):
@@ -18,15 +18,13 @@ def carregar_dados(aba):
         df = conn.read(worksheet=aba, ttl="0s")
         if df is None or df.empty: return pd.DataFrame(columns=COLS_SUICO)
         df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
-        for col in COLS_SUICO:
-            if col not in df.columns: df[col] = None
         return df
     except: return pd.DataFrame(columns=COLS_SUICO)
 
 def salvar_dados(df, aba):
     if aba == ABA_SUICO:
         for col in COLS_SUICO:
-            if col not in df.columns: df[col] = None
+            if col not in df.columns: df[col] = ""
         df = df[COLS_SUICO]
     conn.update(worksheet=aba, data=df)
     st.cache_data.clear()
@@ -42,13 +40,15 @@ df_padrao = carregar_dados(ABA_JOGOS)
 if st.session_state.torneio_ativo is None:
     st.title("⚽ BAGA GESTOR PRO")
     
-    # IDs únicos para não repetir botões
-    ids_s = df_suico['torneio_id'].dropna().unique().tolist()
-    ids_p = df_padrao['torneio_id'].dropna().unique().tolist()
+    # --- CORREÇÃO DO ERRO AQUI ---
+    # Convertemos todos os IDs para STRING (texto) para o sorted() não travar
+    ids_s = [str(x) for x in df_suico['torneio_id'].dropna().unique() if str(x).strip() not in ["", "-", "None"]]
+    ids_p = [str(x) for x in df_padrao['torneio_id'].dropna().unique() if str(x).strip() not in ["", "-", "None"]]
+    
+    lista_final = sorted(list(set(ids_s + ids_p))) # Agora só tem texto, funciona!
     
     st.subheader("📂 Torneios")
-    for t in sorted(list(set(ids_s + ids_p))):
-        if str(t).strip() in ["", "-", "None"]: continue
+    for t in lista_final:
         tipo = "SUICO" if t in ids_s else "PADRAO"
         if st.button(f"{'⭐' if tipo=='SUICO' else '🏆'} {t}", key=f"btn_{t}"):
             st.session_state.torneio_ativo = t
@@ -59,7 +59,7 @@ if st.session_state.torneio_ativo is None:
     ns = st.text_input("Nome do Novo Suíço")
     if st.button("CRIAR SUÍÇO"):
         if ns:
-            nova = pd.DataFrame([[ns, 'SUICO', 'Inscricao', 0, '', '', 0, 0, 'NÃO']], columns=COLS_SUICO)
+            nova = pd.DataFrame([[str(ns), 'SUICO', 'Inscricao', 0, '', '', 0, 0, 'NÃO']], columns=COLS_SUICO)
             salvar_dados(pd.concat([df_suico, nova]), ABA_SUICO)
             st.rerun()
 
@@ -79,7 +79,7 @@ else:
             if senha == "123":
                 st.success("Acesso Liberado!")
                 
-                # AQUI ESTÁ A MUDANÇA: A caixa de times SEMPRE aparece no Admin
+                # CAMPO DE TIMES SEMPRE VISÍVEL NO ADMIN
                 st.markdown("---")
                 st.subheader("📝 Registrar Times / Iniciar Torneio")
                 txt = st.text_area("Cole os times aqui (um por linha):", height=200)
@@ -94,10 +94,8 @@ else:
                             t2 = times[i+1] if i+1 < len(times) else "BYE"
                             jogos.append({'torneio_id':tid, 'formato':'SUICO', 'fase':'Suico', 'rodada':1, 'a':t1, 'b':t2, 'gols_a':0, 'gols_b':0, 'finalizado':'NÃO'})
                         
-                        # Remove rascunhos e salva os novos jogos
                         df_suico = df_suico[df_suico['torneio_id'] != tid]
                         salvar_dados(pd.concat([df_suico, pd.DataFrame(jogos)]), ABA_SUICO)
-                        st.success("Torneio Iniciado!")
                         st.rerun()
                     else:
                         st.error("Mínimo de 6 times!")
@@ -110,9 +108,11 @@ else:
             df_t = df_suico[df_suico['torneio_id'] == tid]
             jogos = df_t[df_t['fase'] == 'Suico']
             if jogos.empty:
-                st.info("Vá em Admin e gere os jogos.")
+                st.info("Aguardando sorteio no Admin.")
             else:
                 for idx, r in jogos.iterrows():
-                    st.write(f"{r['a']} vs {r['b']}")
+                    with st.container(border=True):
+                        st.write(f"**{r['a']}** vs **{r['b']}**")
+
     else:
-        st.write("Modo Liga/Copa - (Coloque seu código aqui)")
+        st.info("Modo Padrão - (Mantenha seu código aqui)")
