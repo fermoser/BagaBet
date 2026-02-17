@@ -1,362 +1,223 @@
 import streamlit as st
 import pandas as pd
 import random
-from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="BAGA GESTOR PRO", layout="wide", page_icon="🏆")
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Gestor de Torneio Suíço", layout="wide")
 
-# --- FUNÇÕES DE BANCO DE DADOS (CORE) ---
-def carregar_dados():
-    try:
-        df = conn.read(worksheet="Suico", ttl=0).dropna(how='all')
-        if df.empty:
-            return pd.DataFrame(columns=['torneio_id', 'rodada', 'a', 'b', 'gols_a', 'gols_b', 'finalizado', 'fase', 'pen_a', 'pen_b'])
-        # Garantir colunas
-        cols_needed = ['torneio_id', 'rodada', 'a', 'b', 'gols_a', 'gols_b', 'finalizado', 'fase', 'pen_a', 'pen_b']
-        for c in cols_needed:
-            if c not in df.columns: df[c] = 0 if 'gols' in c or 'pen' in c else None
-        return df
-    except:
-        return pd.DataFrame(columns=['torneio_id', 'rodada', 'a', 'b', 'gols_a', 'gols_b', 'finalizado', 'fase', 'pen_a', 'pen_b'])
+# --- ESTRUTURA DE DADOS (MODELO) ---
+if 'teams' not in st.session_state:
+    st.session_state.teams = [] 
+if 'rounds' not in st.session_state:
+    st.session_state.rounds = [] 
+if 'phase' not in st.session_state:
+    st.session_state.phase = 'registration' 
+if 'playoff_schedule' not in st.session_state:
+    st.session_state.playoff_schedule = [] 
+if 'champion' not in st.session_state:
+    st.session_state.champion = None
 
-def salvar_dados(df):
-    conn.update(worksheet="Suico", data=df)
-    st.cache_data.clear()
+# --- FUNÇÕES AUXILIARES ---
 
-# --- LÓGICA ESTATÍSTICA ---
-def calcular_stats(df, tid):
-    jogos = df[df['torneio_id'] == tid]
-    times = pd.concat([jogos['a'], jogos['b']]).unique()
-    stats = []
+def get_sorted_rankings(teams, for_pairing=False):
+    """Ordena times por Vitórias -> Saldo -> Gols Pró"""
+    temp_teams = teams.copy()
+    if for_pairing:
+        random.shuffle(temp_teams) # Shuffle leve para desempatar critérios idênticos
     
-    for t in times:
-        if not t or t == "BYE": continue
-        v, d, gp, gc, sg, bye_count = 0, 0, 0, 0, 0, 0
-        history = []
-        
-        # Filtra jogos do time na fase Suíça
-        jogos_t = jogos[(jogos['a'] == t) | (jogos['b'] == t)]
-        
-        for _, row in jogos_t.iterrows():
-            if row['finalizado'] == 'SIM':
-                # Identifica oponente
-                op = row['b'] if row['a'] == t else row['a']
-                if row['fase'] == 'Suíça':
-                    history.append(op)
-                
-                # Gols
-                g_pro = row['gols_a'] if row['a'] == t else row['gols_b']
-                g_con = row['gols_b'] if row['a'] == t else row['gols_a']
-                
-                # Penaltis (para desempate visual apenas, critério Copa é V/D)
-                p_pro = row['pen_a'] if row['a'] == t else row['pen_b']
-                p_con = row['pen_b'] if row['a'] == t else row['pen_a']
-
-                # Lógica de Vitória (Copa: sem empate)
-                is_bye = op == "BYE"
-                if is_bye:
-                    bye_count += 1
-                    v += 1
-                    gp += 1 # Bye conta 1 gol pró
-                    sg += 1
-                else:
-                    gp += g_pro
-                    gc += g_con
-                    sg += (g_pro - g_con)
-                    
-                    if g_pro > g_con: v += 1
-                    elif g_con > g_pro: d += 1
-                    else: # Empate no tempo normal -> decide nos pênaltis
-                        if p_pro > p_con: v += 1
-                        else: d += 1
-
-        status = 'Ativo'
-        if v >= 3: status = 'Classificado'
-        elif d >= 3: status = 'Eliminado'
-        
-        stats.append({
-            'name': t, 'wins': v, 'losses': d, 'goals_for': gp, 
-            'goal_diff': sg, 'received_bye': bye_count > 0, 
-            'history': history, 'status': status, 'buchholz': 0 
-        })
-    
-    # Calcular Buchholz (Soma das vitórias dos oponentes)
-    stats_dict = {t['name']: t for t in stats}
-    for t in stats:
-        bh = 0
-        for op_name in t['history']:
-            if op_name in stats_dict and op_name != "BYE":
-                bh += stats_dict[op_name]['wins']
-        t['buchholz'] = bh
-        
-    return stats
-
-def get_sorted_rankings(stats_list):
-    # Ordena: Vitórias > Buchholz > Não teve Bye > Saldo > Gols Pró
-    return sorted(stats_list, key=lambda x: (
+    return sorted(temp_teams, key=lambda x: (
         x['wins'], 
-        x['buchholz'],
-        not x['received_bye'], 
         x['goal_diff'], 
         x['goals_for']
     ), reverse=True)
 
-# --- PAREAMENTO ANTI-TRAVAMENTO ---
-def gerar_pareamento_suico(stats_list):
-    ativos = [t for t in stats_list if t['status'] == 'Ativo']
-    # Ordena para pareamento
-    ativos.sort(key=lambda x: (x['wins'], x['buchholz']), reverse=True)
-    
-    pares = []
-    escolhidos = set()
-    
-    # 1. BYE
-    if len(ativos) % 2 != 0:
-        # Pega o pior classificado que ainda não teve bye
-        candidatos_bye = sorted(ativos, key=lambda x: (x['wins'], not x['received_bye'], x['goal_diff']))
-        bye_team = None
-        for cand in candidatos_bye:
-            if not cand['received_bye']:
-                bye_team = cand
-                break
-        if not bye_team: bye_team = candidatos_bye[0] # Fallback
-        
-        pares.append((bye_team['name'], "BYE"))
-        escolhidos.add(bye_team['name'])
-    
-    # 2. Pareamento Preferencial (Inédito)
-    for i in range(len(ativos)):
-        t1 = ativos[i]
-        if t1['name'] in escolhidos: continue
-        
-        for j in range(i + 1, len(ativos)):
-            t2 = ativos[j]
-            if t2['name'] in escolhidos: continue
+def update_team_stats(team_id, goals_scored, goals_conceded, is_winner, is_bye=False):
+    for team in st.session_state.teams:
+        if team['id'] == team_id:
+            team['goals_for'] += goals_scored
+            team['goal_diff'] += (goals_scored - goals_conceded)
+            if is_winner: team['wins'] += 1
+            else: team['losses'] += 1
+            if is_bye: team['received_bye'] = True
             
-            if t2['name'] not in t1['history']:
-                pares.append((t1['name'], t2['name']))
-                escolhidos.add(t1['name']); escolhidos.add(t2['name'])
-                break
-    
-    # 3. Pareamento de Resgate (Repete jogo se necessário)
-    sobraram = [t for t in ativos if t['name'] not in escolhidos]
-    for i in range(0, len(sobraram), 2):
-        if i+1 < len(sobraram):
-            pares.append((sobraram[i]['name'], sobraram[i+1]['name']))
-        elif sobraram[i]['name'] not in escolhidos: # Caso raríssimo de sobra pós-bye
-             pares.append((sobraram[i]['name'], "BYE"))
-             
-    return pares
+            # Regra Suíça: 3 Vitórias classifica, 3 Derrotas elimina
+            if st.session_state.phase == 'swiss':
+                if team['wins'] >= 3: team['status'] = 'Classificado'
+                elif team['losses'] >= 3: team['status'] = 'Eliminado'
+            break
 
-# --- UI COMPONENTS ---
-def render_sidebar(stats):
+def render_sidebar_stats():
     with st.sidebar:
-        st.header("📊 Classificação Ao Vivo")
-        if stats:
-            ranked = get_sorted_rankings(stats)
+        st.header("📊 Classificação")
+        if st.session_state.teams:
+            sorted_teams = get_sorted_rankings(st.session_state.teams)
             display_data = []
-            for t in ranked:
-                icon = "🟢" if t['status']=='Classificado' else "🔴" if t['status']=='Eliminado' else "⚪"
+            for t in sorted_teams:
+                status_icon = "🟢" if t['status'] == 'Classificado' else "🔴" if t['status'] == 'Eliminado' else "⚪"
                 display_data.append({
-                    'St': icon, 'Time': t['name'], 'V-D': f"{t['wins']}-{t['losses']}",
-                    'BH': t['buchholz'], 'SG': t['goal_diff']
+                    'St': status_icon,
+                    'Time': t['name'],
+                    'V-D': f"{t['wins']}-{t['losses']}",
+                    'SG': t['goal_diff']
                 })
-            st.dataframe(pd.DataFrame(display_data), hide_index=True, use_container_width=True)
-            st.caption("BH: Buchholz (Força dos oponentes)")
-        else:
-            st.info("Aguardando início.")
+            st.table(pd.DataFrame(display_data))
 
-# --- APP PRINCIPAL ---
-df_total = carregar_dados()
+# --- LÓGICA DO SUIÇO ---
 
-if 'torneio_ativo' not in st.session_state or not st.session_state.torneio_ativo:
-    st.title("🏆 BAGA GESTOR PRO")
-    with st.expander("🆕 Criar Novo Torneio", expanded=True):
-        nome_t = st.text_input("Nome do Torneio")
-        lista = st.text_area("Jogadores (um por linha)")
-        if st.button("🚀 Iniciar Torneio"):
-            nomes = [x.strip() for x in lista.split('\n') if x.strip()]
-            if 6 <= len(nomes) <= 20:
-                random.shuffle(nomes)
-                # Gera Rodada 1
-                pares = []
-                for i in range(0, len(nomes), 2):
-                    pares.append({'torneio_id': nome_t, 'rodada': 1, 'a': nomes[i], 'b': nomes[i+1], 'fase': 'Suíça', 'finalizado': 'NÃO'})
-                
-                df_novo = pd.concat([df_total, pd.DataFrame(pares)])
-                salvar_dados(df_novo)
-                st.session_state.torneio_ativo = nome_t
-                st.rerun()
-            else:
-                st.error("Mínimo 6 jogadores.")
+def generate_swiss_round():
+    active_teams = [t for t in st.session_state.teams if t['status'] == 'Ativo']
+    if not active_teams: return
     
-    st.divider()
-    tids = df_total['torneio_id'].unique()
-    if len(tids) > 0:
-        st.subheader("Carregar Torneio Existente")
-        cols = st.columns(4)
-        for i, tid in enumerate(tids):
-            if cols[i%4].button(f"📂 {tid}", key=tid):
-                st.session_state.torneio_ativo = tid
-                st.rerun()
+    random.shuffle(active_teams)
+    bye_team = None
+    if len(active_teams) % 2 != 0:
+        # Pega o pior classificado que ainda não recebeu Bye
+        eligible_for_bye = sorted([t for t in active_teams if not t['received_bye']], key=lambda x: (x['wins'], x['goal_diff']))
+        bye_team = eligible_for_bye[0] if eligible_for_bye else active_teams[-1]
+        active_teams.remove(bye_team)
 
-else:
-    # --- DENTRO DO TORNEIO ---
-    tid = st.session_state.torneio_ativo
-    df_t = df_total[df_total['torneio_id'] == tid].copy()
-    stats = calcular_stats(df_t, tid)
+    ranked_pool = get_sorted_rankings(active_teams, for_pairing=True)
+    matches = []
+    while len(ranked_pool) >= 2:
+        home = ranked_pool.pop(0)
+        # Tenta evitar repetir confronto
+        opponent = next((c for c in ranked_pool if c['id'] not in home['history']), ranked_pool[0])
+        ranked_pool.remove(opponent)
+        matches.append({'home': home['id'], 'away': opponent['id']})
+        home['history'].append(opponent['id'])
+        opponent['history'].append(home['id'])
+
+    st.session_state.rounds.append({'matches': matches, 'bye': bye_team})
+
+# --- LÓGICA DO MATA-MATA (SISTEMA 1º vs ÚLTIMO) ---
+
+def init_playoffs():
+    qualified = [t for t in st.session_state.teams if t['status'] == 'Classificado']
+    seeds = get_sorted_rankings(qualified) 
+    num_q = len(seeds)
+    current_matches = []
+    waiting_teams = []
+    round_name = ""
+
+    # Chaveamento Lógico: 1º vs Último
+    if num_q >= 8:
+        round_name = "Quartas de Final (1ºx8º)"
+        s = seeds[:8]
+        current_matches = [
+            {'home': s[0], 'away': s[7], 'label': 'Jogo 1'},
+            {'home': s[1], 'away': s[6], 'label': 'Jogo 2'},
+            {'home': s[2], 'away': s[5], 'label': 'Jogo 3'},
+            {'home': s[3], 'away': s[4], 'label': 'Jogo 4'}
+        ]
+    elif num_q >= 4:
+        round_name = "Semifinais (1ºx4º)"
+        s = seeds[:4]
+        current_matches = [
+            {'home': s[0], 'away': s[3], 'label': 'Semi 1'},
+            {'home': s[1], 'away': s[2], 'label': 'Semi 2'}
+        ]
+    elif num_q == 2:
+        round_name = "Grande Final"
+        current_matches = [{'home': seeds[0], 'away': seeds[1], 'label': 'Final'}]
     
-    st.markdown(f"## 🏟️ Torneio: **{tid}**")
-    if st.button("⬅️ Voltar / Sair"):
-        st.session_state.torneio_ativo = None
-        st.rerun()
-        
-    render_sidebar(stats)
-    
-    # Verifica Fase Atual
-    fases_ativas = df_t[df_t['finalizado'] == 'NÃO']['fase'].unique()
-    fase_atual = fases_ativas[0] if len(fases_ativas) > 0 else "Intervalo"
-    
-    # Lógica de Controle
-    ativos = [t for t in stats if t['status'] == 'Ativo']
-    rodada_max = df_t['rodada'].max()
-    jogos_abertos = df_t[(df_t['finalizado'] == 'NÃO') & (df_t['rodada'] == rodada_max)]
-    
-    # --- ÁREA DE JOGOS ---
-    if not jogos_abertos.empty:
-        st.subheader(f"⚔️ Jogos em Andamento - {fase_atual}")
-        if fase_atual == "Suíça": st.caption(f"Rodada {rodada_max}")
-        
-        for idx, row in jogos_abertos.iterrows():
-            with st.container(border=True):
-                c1, c2, c3, c4 = st.columns([2, 1, 1, 2])
-                c1.markdown(f"<h3 style='text-align:right'>{row['a']}</h3>", unsafe_allow_html=True)
-                
-                # Form para lançar resultado
-                with st.form(key=f"game_{idx}"):
-                    cc1, cc2 = st.columns(2)
-                    ga = cc1.number_input("Gols", 0, 99, key=f"ga_{idx}")
-                    gb = cc2.number_input("Gols", 0, 99, key=f"gb_{idx}")
-                    
-                    pa, pb = 0, 0
-                    if ga == gb:
-                        st.warning("Empate! Insira os pênaltis:")
-                        cp1, cp2 = st.columns(2)
-                        pa = cp1.number_input(f"Pênaltis {row['a']}", 0, 20, key=f"pa_{idx}")
-                        pb = cp2.number_input(f"Pênaltis {row['b']}", 0, 20, key=f"pb_{idx}")
-                        
-                    if st.form_submit_button("✅ Finalizar Jogo"):
-                        if ga == gb and pa == pb:
-                            st.error("Pênaltis não podem empatar!")
-                        else:
-                            # Atualiza no Dataframe Total
-                            idx_real = df_total[(df_total['torneio_id'] == tid) & (df_total['a'] == row['a']) & (df_total['b'] == row['b']) & (df_total['rodada'] == row['rodada'])].index[0]
-                            df_total.at[idx_real, 'gols_a'] = ga
-                            df_total.at[idx_real, 'gols_b'] = gb
-                            df_total.at[idx_real, 'pen_a'] = pa
-                            df_total.at[idx_real, 'pen_b'] = pb
-                            df_total.at[idx_real, 'finalizado'] = 'SIM'
-                            salvar_dados(df_total)
-                            st.rerun()
-                c4.markdown(f"<h3>{row['b']}</h3>", unsafe_allow_html=True)
-                
+    st.session_state.playoff_schedule.append({'name': round_name, 'matches': current_matches, 'waiting': waiting_teams})
+    st.session_state.phase = 'playoff_gameplay'
+
+def advance_playoff_round(winners):
+    if len(winners) == 1:
+        st.session_state.champion = winners[0]
+        st.session_state.phase = 'champion'
     else:
-        # --- INTERVALO / GERAÇÃO DE RODADA ---
-        st.success("✅ Rodada Concluída!")
+        # Re-seeding para a próxima fase (1º vs Último entre os sobreviventes)
+        seeds = get_sorted_rankings(winners)
+        next_matches = []
+        mid = len(seeds) // 2
+        for i in range(mid):
+            next_matches.append({'home': seeds[i], 'away': seeds[-(i+1)], 'label': f'Confronto {i+1}'})
         
-        # Se for Suíço e ainda tiver gente ativa
-        if len(ativos) >= 2 and fase_atual != "Final":
-            c1, c2 = st.columns(2)
-            if c1.button("🎲 Gerar Próxima Rodada Suíça"):
-                novos_pares = gerar_pareamento_suico(stats)
-                novos_dados = []
-                for p in novos_pares:
-                    is_bye = p[1] == "BYE"
-                    novos_dados.append({
-                        'torneio_id': tid, 'rodada': rodada_max + 1,
-                        'a': p[0], 'b': p[1],
-                        'gols_a': 1 if is_bye else 0, 'gols_b': 0,
-                        'finalizado': 'SIM' if is_bye else 'NÃO',
-                        'fase': 'Suíça'
-                    })
-                df_novo = pd.concat([df_total, pd.DataFrame(novos_dados)])
-                salvar_dados(df_novo)
+        name = "Semifinal" if len(winners) == 4 else "Final"
+        st.session_state.playoff_schedule.append({'name': name, 'matches': next_matches, 'waiting': []})
+
+# --- INTERFACE ---
+
+if st.session_state.phase == 'registration':
+    st.title("🏆 Inscrição do Torneio")
+    name = st.text_input("Nome do Time")
+    if st.button("Adicionar"):
+        if name:
+            st.session_state.teams.append({'id': len(st.session_state.teams)+1, 'name': name, 'wins': 0, 'losses': 0, 'goals_for': 0, 'goal_diff': 0, 'received_bye': False, 'history': [], 'status': 'Ativo'})
+            st.rerun()
+    
+    if len(st.session_state.teams) >= 6:
+        if st.button("🚀 INICIAR TORNEIO"):
+            st.session_state.phase = 'swiss'
+            generate_swiss_round()
+            st.rerun()
+
+elif st.session_state.phase == 'swiss':
+    st.title(f"⚔️ Rodada Suíça {len(st.session_state.rounds)}")
+    curr = st.session_state.rounds[-1]
+    
+    with st.form("results"):
+        results = []
+        for i, m in enumerate(curr['matches']):
+            t1 = next(t for t in st.session_state.teams if t['id'] == m['home'])
+            t2 = next(t for t in st.session_state.teams if t['id'] == m['away'])
+            c1, c2, c3, c4 = st.columns([2,1,1,2])
+            with c1: st.write(f"**{t1['name']}**")
+            with c2: s1 = st.number_input("Gols", 0, key=f"s1_{i}")
+            with c3: s2 = st.number_input("Gols", 0, key=f"s2_{i}")
+            with c4: st.write(f"**{t2['name']}**")
+            results.append((t1['id'], t2['id'], s1, s2))
+        
+        if st.form_submit_button("Confirmar Resultados"):
+            if curr['bye']: update_team_stats(curr['bye']['id'], 1, 0, True, True)
+            for r in results:
+                update_team_stats(r[0], r[2], r[3], r[2] > r[3])
+                update_team_stats(r[1], r[3], r[2], r[3] > r[2])
+            
+            # Checa se ainda existem times "Ativos"
+            ativos = [t for t in st.session_state.teams if t['status'] == 'Ativo']
+            if len(ativos) <= 1: init_playoffs()
+            else: generate_swiss_round()
+            st.rerun()
+
+elif st.session_state.phase == 'playoff_gameplay':
+    curr_phase = st.session_state.playoff_schedule[-1]
+    st.title(f"🔥 {curr_phase['name']}")
+    
+    with st.form("playoff_results"):
+        winners = []
+        all_filled = True
+        for i, m in enumerate(curr_phase['matches']):
+            st.markdown(f"**{m['label']}**")
+            c1, c2, c3, c4 = st.columns([2,1,1,2])
+            with c1: st.write(m['home']['name'])
+            with c2: g1 = st.number_input("Gols", 0, key=f"pg1_{i}")
+            with c3: g2 = st.number_input("Gols", 0, key=f"pg2_{i}")
+            with c4: st.write(m['away']['name'])
+            
+            if g1 == g2:
+                st.warning("Empate! Informe os pênaltis:")
+                cp1, cp2 = st.columns(2)
+                p1 = cp1.number_input("Pênaltis", 0, key=f"p1_{i}")
+                p2 = cp2.number_input("Pênaltis", 0, key=f"p2_{i}")
+                if p1 == p2: all_filled = False
+                winners.append(m['home'] if p1 > p2 else m['away'])
+            else:
+                winners.append(m['home'] if g1 > g2 else m['away'])
+        
+        if st.form_submit_button("Avançar Fase"):
+            if all_filled:
+                advance_playoff_round(winners)
                 st.rerun()
-            
-            if c2.button("⚠️ Forçar Fim da Fase Suíça (Ir p/ Mata-Mata)"):
-                # Cria um registro dummy para marcar transição se necessário, 
-                # mas aqui vamos apenas mudar a lógica de exibição baseada no status
-                pass # A lógica abaixo cuidará disso
-                
-        # --- LÓGICA MATA-MATA AUTOMÁTICA ---
-        elif len(ativos) <= 1 or fase_atual in ["Semifinal", "Final"]:
-            classificados = [t for t in stats if t['status'] == 'Classificado']
-            seeds = get_sorted_rankings(classificados)
-            
-            # Verifica se já tem mata-mata gerado
-            tem_semi = not df_t[df_t['fase'] == 'Semifinal'].empty
-            tem_final = not df_t[df_t['fase'] == 'Final'].empty
-            
-            if not tem_semi and not tem_final:
-                st.info(f"Classificados: {len(seeds)}")
-                if len(seeds) < 2:
-                    st.error("Não há classificados suficientes para Mata-Mata.")
-                else:
-                    if st.button("🔥 Gerar Semifinais / Final"):
-                        novos_jogos = []
-                        # Exemplo simples: Top 4 vai pra semi, Top 2 direto pra final, ou Top 3 (1 na final, 2 semi)
-                        if len(seeds) >= 4:
-                            novos_jogos.append({'torneio_id': tid, 'rodada': 90, 'a': seeds[0]['name'], 'b': seeds[3]['name'], 'fase': 'Semifinal', 'finalizado': 'NÃO'})
-                            novos_jogos.append({'torneio_id': tid, 'rodada': 90, 'a': seeds[1]['name'], 'b': seeds[2]['name'], 'fase': 'Semifinal', 'finalizado': 'NÃO'})
-                        elif len(seeds) == 3:
-                            # 1º espera, 2º x 3º
-                            novos_jogos.append({'torneio_id': tid, 'rodada': 90, 'a': seeds[1]['name'], 'b': seeds[2]['name'], 'fase': 'Semifinal', 'finalizado': 'NÃO'})
-                        elif len(seeds) == 2:
-                            novos_jogos.append({'torneio_id': tid, 'rodada': 99, 'a': seeds[0]['name'], 'b': seeds[1]['name'], 'fase': 'Final', 'finalizado': 'NÃO'})
-                        
-                        salvar_dados(pd.concat([df_total, pd.DataFrame(novos_jogos)]))
-                        st.rerun()
+            else: st.error("Defina um vencedor nos pênaltis!")
 
-            elif tem_semi and not tem_final:
-                # Checar se semis acabaram
-                semis = df_t[df_t['fase'] == 'Semifinal']
-                if semis['finalizado'].all():
-                    if st.button("🏆 Gerar Grande Final"):
-                        vencedores = []
-                        for _, row in semis.iterrows():
-                            # Quem ganhou? (Considerando penaltis)
-                            if row['gols_a'] > row['gols_b']: vencedores.append(row['a'])
-                            elif row['gols_b'] > row['gols_a']: vencedores.append(row['b'])
-                            else: vencedores.append(row['a'] if row['pen_a'] > row['pen_b'] else row['b'])
-                        
-                        # Se tinha 3 jogadores (top 1 esperando)
-                        if len(vencedores) == 1: 
-                            # Pega o Top 1 do ranking original
-                            top_seed = seeds[0]['name']
-                            # Verifica se o Top 1 não jogou a semi (se jogou, é bug, mas assumimos logica de 3)
-                            salvar_dados(pd.concat([df_total, pd.DataFrame([{'torneio_id': tid, 'rodada': 99, 'a': top_seed, 'b': vencedores[0], 'fase': 'Final', 'finalizado': 'NÃO'}])]))
-                        else:
-                            salvar_dados(pd.concat([df_total, pd.DataFrame([{'torneio_id': tid, 'rodada': 99, 'a': vencedores[0], 'b': vencedores[1], 'fase': 'Final', 'finalizado': 'NÃO'}])]))
-                        st.rerun()
-            
-            elif tem_final:
-                final = df_t[df_t['fase'] == 'Final'].iloc[0]
-                if final['finalizado'] == 'SIM':
-                    campeao = final['a']
-                    if final['gols_b'] > final['gols_a']: campeao = final['b']
-                    elif final['gols_a'] == final['gols_b'] and final['pen_b'] > final['pen_a']: campeao = final['b']
-                    
-                    st.balloons()
-                    st.markdown(f"<h1 style='text-align:center; font-size: 80px'>🏆 {campeao} 🏆</h1>", unsafe_allow_html=True)
-                    if st.button("Reiniciar / Apagar Torneio"):
-                         df_limpo = df_total[df_total['torneio_id'] != tid]
-                         salvar_dados(df_limpo)
-                         st.session_state.torneio_ativo = None
-                         st.rerun()
+elif st.session_state.phase == 'champion':
+    st.balloons()
+    st.title(f"🏆 CAMPEÃO: {st.session_state.champion['name']}")
+    if st.button("Novo Torneio"):
+        for k in list(st.session_state.keys()): del st.session_state[k]
+        st.rerun()
 
-    # --- HISTÓRICO DE JOGOS ABAIXO ---
-    st.divider()
-    with st.expander("📜 Histórico de Jogos"):
-        st.dataframe(df_t[['fase', 'rodada', 'a', 'gols_a', 'gols_b', 'b', 'pen_a', 'pen_b', 'finalizado']].sort_values(by='rodada', ascending=False), use_container_width=True)
+render_sidebar_stats()
