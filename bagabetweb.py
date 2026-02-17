@@ -3,80 +3,99 @@ import pandas as pd
 import random
 from streamlit_gsheets import GSheetsConnection
 
-st.set_page_config(page_title="BAGA DEBUG", layout="wide")
+st.set_page_config(page_title="BAGA FIX", layout="wide")
 
-# 1. CONEXÃO
+# 1. CONEXÃO DIRETA E LIMPEZA
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 2. LIMPEZA DE CACHE (Botão para forçar o app a ler o Google Sheets de novo)
-if st.sidebar.button("♻️ LIMPAR MEMÓRIA DO APP"):
+# Botão de emergência para limpar o cache se o Google Sheets travar
+if st.sidebar.button("♻️ FORÇAR ATUALIZAÇÃO"):
     st.cache_data.clear()
     st.rerun()
 
-# 3. LEITURA DIRETA
-def carregar(aba):
+def carregar_tudo():
     try:
-        # ttl=0 força o app a não guardar memória velha
-        return conn.read(worksheet=aba, ttl=0).dropna(how='all')
-    except Exception as e:
-        st.error(f"Erro ao ler aba {aba}: {e}")
-        return pd.DataFrame()
+        # Lê a aba Suico sem guardar memória cache (ttl=0)
+        df = conn.read(worksheet="Suico", ttl=0)
+        if df is None or df.empty:
+            return pd.DataFrame(columns=['torneio_id', 'fase', 'a', 'b'])
+        # Remove colunas fantasmas do Google
+        df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+        return df
+    except:
+        return pd.DataFrame(columns=['torneio_id', 'fase', 'a', 'b'])
 
-df_suico = carregar("Suico")
+df_total = carregar_tudo()
 
-st.title("⚽ TESTE DE CONEXÃO")
-
-# MOSTRA O QUE TEM NA PLANILHA AGORA
-with st.expander("🔍 Ver o que o Python está lendo no Google Sheets"):
-    st.write(df_suico)
-
-# 4. LÓGICA DE EXIBIÇÃO
-if df_suico.empty:
-    st.warning("A planilha 'Suico' parece vazia para o Python.")
-else:
-    # Pega os nomes dos torneios
-    lista_torneios = df_suico['torneio_id'].unique().tolist()
+# --- TELA INICIAL ---
+if 'torneio_ativo' not in st.session_state:
+    st.title("⚽ GESTOR BAGA")
     
-    st.subheader("Torneios Encontrados:")
-    for t in lista_torneios:
-        if st.button(f"Abrir: {t}"):
-            st.session_state.torneio_ativo = t
-            st.rerun()
-
-# 5. ADMIN "NA MARRA"
-if 'torneio_ativo' in st.session_state:
-    st.divider()
-    st.header(f"⚙️ Admin: {st.session_state.torneio_ativo}")
-    
-    senha = st.text_input("Senha", type="password")
-    if senha == "123":
-        st.success("Logado!")
-        
-        # A CAIXA DE TEXTO QUE VOCÊ PRECISA
-        txt = st.text_area("COLE OS TIMES AQUI (UM POR LINHA)")
-        
-        if st.button("🚀 GERAR JOGOS AGORA"):
-            times = [x.strip() for x in txt.split('\n') if x.strip()]
-            if len(times) >= 2:
-                # Criando os jogos
-                novos = []
-                for i in range(0, len(times), 2):
-                    t1 = times[i]
-                    t2 = times[i+1] if i+1 < len(times) else "BYE"
-                    novos.append({'torneio_id': st.session_state.torneio_ativo, 'a': t1, 'b': t2, 'fase': 'Suico'})
-                
-                # Salvando
-                df_final = pd.concat([df_suico, pd.DataFrame(novos)])
+    # Criar Novo
+    with st.expander("➕ CRIAR NOVO TORNEIO SUÍÇO"):
+        novo_nome = st.text_input("Nome do Torneio")
+        if st.button("Confirmar Criação"):
+            if novo_nome:
+                # Criamos apenas com o ID e Fase, o resto o Google completa
+                nova_linha = pd.DataFrame([{'torneio_id': novo_nome, 'fase': 'Inscricao'}])
+                df_final = pd.concat([df_total, nova_linha], ignore_index=True)
                 conn.update(worksheet="Suico", data=df_final)
                 st.cache_data.clear()
-                st.success("Salvou! Clique em 'Limpar Memória' na lateral.")
-            else:
-                st.error("Coloque pelo menos 2 times para testar.")
+                st.success("Criado! Clique em 'FORÇAR ATUALIZAÇÃO'")
 
-st.divider()
-if st.button("CRIAR NOVO TESTE"):
-    n = "Teste_" + str(random.randint(1,999))
-    df_novo = pd.concat([df_suico, pd.DataFrame([{'torneio_id': n, 'fase': 'Inscricao'}])])
-    conn.update(worksheet="Suico", data=df_novo)
-    st.cache_data.clear()
-    st.rerun()
+    # Listar Torneios (Tratando o erro de IDs mistos que deu antes)
+    if not df_total.empty and 'torneio_id' in df_total.columns:
+        st.subheader("Seus Torneios:")
+        ids = [str(x) for x in df_total['torneio_id'].dropna().unique() if str(x).strip() != ""]
+        for tid in sorted(ids):
+            if st.button(f"Entrar em: {tid}"):
+                st.session_state.torneio_ativo = tid
+                st.rerun()
+
+# --- ÁREA DO TORNEIO ---
+else:
+    tid = st.session_state.torneio_ativo
+    st.header(f"🏆 Torneio: {tid}")
+    
+    if st.button("⬅️ Voltar"):
+        st.session_state.torneio_ativo = None
+        st.rerun()
+
+    menu = st.tabs(["🎮 Jogos", "⚙️ Admin"])
+
+    with menu[1]: # Aba ADMIN
+        st.subheader("Painel de Controle")
+        senha = st.text_input("Senha", type="password")
+        if senha == "123":
+            # A CAIXA QUE VOCÊ PRECISA
+            st.markdown("---")
+            txt_times = st.text_area("COLE OS TIMES AQUI (UM POR LINHA)", height=250)
+            
+            if st.button("🚀 SORTEAR E INICIAR AGORA"):
+                times = [x.strip() for x in txt_times.split('\n') if x.strip()]
+                if len(times) >= 4:
+                    random.shuffle(times)
+                    jogos = []
+                    for i in range(0, len(times), 2):
+                        t1 = times[i]
+                        t2 = times[i+1] if i+1 < len(times) else "BYE"
+                        jogos.append({'torneio_id': tid, 'fase': 'Suico', 'a': t1, 'b': t2, 'finalizado': 'NÃO'})
+                    
+                    # Remove o rascunho e salva os jogos
+                    df_outros = df_total[df_total['torneio_id'] != tid]
+                    df_final = pd.concat([df_outros, pd.DataFrame(jogos)], ignore_index=True)
+                    conn.update(worksheet="Suico", data=df_final)
+                    st.cache_data.clear()
+                    st.success("Jogos Gerados! Volte na aba 'Jogos'.")
+                else:
+                    st.error("Coloque pelo menos 4 times.")
+
+    with menu[0]: # Aba JOGOS
+        st.subheader("Partidas Atuais")
+        meus_jogos = df_total[(df_total['torneio_id'] == tid) & (df_total['fase'] == 'Suico')]
+        
+        if meus_jogos.empty:
+            st.info("Nenhum jogo gerado. Vá ao Admin.")
+        else:
+            for _, r in meus_jogos.iterrows():
+                st.write(f"🏟️ **{r.get('a', '???')}** vs **{r.get('b', '???')}**")
