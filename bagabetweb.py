@@ -4,22 +4,18 @@ import random
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="BAGA GESTOR - TORNEIO COMPLETO", layout="wide")
+st.set_page_config(page_title="BAGA GESTOR - SUIÇO E MATA-MATA", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- FUNÇÕES DE PERSISTÊNCIA ---
 
 def sync_to_sheets():
-    """Salva os times na aba 'Suico', tratando listas para texto"""
     if not st.session_state.teams:
-        # Se vazio, cria cabeçalho padrão
         cols = ['id', 'name', 'wins', 'losses', 'goals_for', 'goal_diff', 'received_bye', 'history', 'status']
         df_save = pd.DataFrame(columns=cols)
     else:
         df_save = pd.DataFrame(st.session_state.teams)
-        # Converte lista de IDs em string para o Sheets aceitar
         df_save['history'] = df_save['history'].apply(lambda x: str(x))
-    
     conn.update(worksheet="Suico", data=df_save)
 
 # --- INICIALIZAÇÃO DO ESTADO ---
@@ -28,7 +24,6 @@ if 'teams' not in st.session_state:
     try:
         df_load = conn.read(worksheet="Suico", ttl=0).dropna(how='all')
         if not df_load.empty:
-            # Converte string de volta para lista [1, 2, 3]
             df_load['history'] = df_load['history'].apply(lambda x: eval(x) if isinstance(x, str) else [])
             st.session_state.teams = df_load.to_dict('records')
         else:
@@ -36,7 +31,6 @@ if 'teams' not in st.session_state:
     except:
         st.session_state.teams = []
 
-# Estados de controle da sessão
 states = {
     'rounds': [], 'phase': 'registration', 'playoff_schedule': [], 
     'champion': None, 'swiss_asking_penalties': False, 'playoff_asking_penalties': False
@@ -44,13 +38,12 @@ states = {
 for key, val in states.items():
     if key not in st.session_state: st.session_state[key] = val
 
-# --- LÓGICA DE RANKING E ESTATÍSTICAS ---
+# --- LÓGICA DE RANKING ---
 
 def get_sorted_rankings(teams, for_pairing=False):
     if for_pairing:
         teams = teams.copy()
         random.shuffle(teams)
-    # Ranking: Vitórias > Menos Derrotas > Sem Bye > Saldo > GP
     return sorted(teams, key=lambda x: (
         x['wins'], -x['losses'], not x['received_bye'], x['goal_diff'], x['goals_for']
     ), reverse=True)
@@ -86,7 +79,6 @@ def generate_swiss_round():
     matches = []
     while len(ranked) >= 2:
         home = ranked.pop(0)
-        # Busca oponente que ainda não enfrentou
         idx_op = next((i for i, c in enumerate(ranked) if c['id'] not in home['history']), 0)
         opp = ranked.pop(idx_op)
         matches.append({'home': home['id'], 'away': opp['id']})
@@ -97,20 +89,30 @@ def generate_swiss_round():
     sync_to_sheets()
 
 def init_playoffs():
+    """Lógica de Chaveamento: 1º vs Último, 2º vs Penúltimo"""
     qualified = [t for t in st.session_state.teams if t['status'] == 'Classificado']
     seeds = get_sorted_rankings(qualified)
     n = len(seeds)
     m, w, name = [], [], ""
 
-    if n == 3:
-        name, w, m = "Semifinal Única", [seeds[0]], [{'id':'S1','home':seeds[1],'away':seeds[2],'label':'Semi'}]
-    elif n == 4:
-        name, m = "Semifinais", [{'id':'S1','home':seeds[0],'away':seeds[3],'label':'Semi 1'},{'id':'S2', 'home':seeds[1],'away':seeds[2],'label':'Semi 2'}]
-    elif n >= 5: # Lógica simplificada para 5-8: Quartas ou Wildcards
-        name = "Quartas de Final"
-        num_matches = 4 if n >= 8 else (n // 2)
-        m = [{'id': f'Q{i}', 'home': seeds[i], 'away': seeds[-(i+1)], 'label': f'Jogo {i+1}'} for i in range(num_matches)]
-        w = seeds[num_matches : n - num_matches]
+    if n < 2:
+        st.error("Classificados insuficientes para o mata-mata.")
+        return
+
+    # Determina o tamanho da chave (2, 4 ou 8)
+    if n >= 8:
+        name, seeds = "Quartas de Final", seeds[:8]
+        m = [{'id':f'Q{i}','home':seeds[i],'away':seeds[7-i],'label':f'Jogo {i+1}'} for i in range(4)]
+    elif n >= 4:
+        name, seeds = "Semifinais", seeds[:4]
+        m = [{'id':f'S{i}','home':seeds[i],'away':seeds[3-i],'label':f'Semi {i+1}'} for i in range(2)]
+    elif n == 3:
+        name = "Semifinal Única"
+        w = [seeds[0]] # 1º lugar espera na final
+        m = [{'id':'S1','home':seeds[1],'away':seeds[2],'label':'Semifinal'}]
+    elif n == 2:
+        name = "Grande Final"
+        m = [{'id':'F','home':seeds[0],'away':seeds[1],'label':'Final'}]
 
     st.session_state.playoff_schedule = [{'name': name, 'matches': m, 'waiting': w, 'completed': False}]
     st.session_state.phase = 'playoff_gameplay'
@@ -119,23 +121,33 @@ def init_playoffs():
 def advance_playoff(winners, waiting):
     st.session_state.playoff_asking_penalties = False
     pool = get_sorted_rankings(waiting + winners)
-    if len(pool) == 1:
-        st.session_state.champion = pool[0]
+    
+    if len(pool) <= 1:
+        st.session_state.champion = pool[0] if pool else None
         st.session_state.phase = 'champion'
     elif len(pool) == 2:
-        st.session_state.playoff_schedule.append({'name': 'Grande Final', 'matches': [{'id':'F','home':pool[0],'away':pool[1],'label':'Final'}], 'waiting': [], 'completed': False})
-    else:
-        # Meio de caminho (ex: de Quartas para Semis)
-        st.session_state.playoff_schedule.append({'name': 'Semifinais', 'matches': [{'id':'S1','home':pool[0],'away':pool[-1],'label':'Semi 1'},{'id':'S2','home':pool[1],'away':pool[-2],'label':'Semi 2'}], 'waiting': [], 'completed': False})
+        st.session_state.playoff_schedule.append({
+            'name': 'Grande Final', 
+            'matches': [{'id':'F','home':pool[0],'away':pool[1],'label':'Final'}], 
+            'waiting': [], 'completed': False
+        })
+    elif len(pool) <= 4:
+        st.session_state.playoff_schedule.append({
+            'name': 'Semifinais', 
+            'matches': [{'id':'S1','home':pool[0],'away':pool[3],'label':'Semi 1'},
+                        {'id':'S2','home':pool[1],'away':pool[2],'label':'Semi 2'}], 
+            'waiting': [], 'completed': False
+        })
 
 # --- INTERFACE ---
 
 with st.sidebar:
-    st.header("📊 Ranking")
+    st.header("📊 Classificação")
     if st.session_state.teams:
-        st.table(pd.DataFrame(get_sorted_rankings(st.session_state.teams))[['status','name','wins','losses','goal_diff']])
-    if st.button("🗑️ RESETAR TORNEIO"):
-        st.session_state.teams = []
+        df_side = pd.DataFrame(get_sorted_rankings(st.session_state.teams))
+        st.table(df_side[['status','name','wins','losses']])
+    if st.button("🗑️ RESETAR TUDO"):
+        st.session_state.clear()
         sync_to_sheets()
         st.rerun()
 
@@ -149,18 +161,16 @@ if st.session_state.phase == 'registration':
             if name:
                 new_id = max([t['id'] for t in st.session_state.teams], default=0) + 1
                 st.session_state.teams.append({'id':new_id, 'name':name, 'wins':0, 'losses':0, 'goals_for':0, 'goal_diff':0, 'received_bye':False, 'history':[], 'status':'Ativo'})
-                sync_to_sheets()
-                st.rerun()
-    if len(st.session_state.teams) >= 6:
-        if st.button("🚀 Iniciar Torneio"):
+                sync_to_sheets(); st.rerun()
+    if len(st.session_state.teams) >= 2:
+        if st.button("🚀 Iniciar Fase Suíça"):
             st.session_state.phase = 'swiss'
-            generate_swiss_round()
-            st.rerun()
+            generate_swiss_round(); st.rerun()
 
 elif st.session_state.phase == 'swiss':
     st.title(f"⚔️ Rodada Suíça {len(st.session_state.rounds)}")
     curr = st.session_state.rounds[-1]
-    if curr['bye']: st.warning(f"Folga: {curr['bye']['name']}")
+    if curr['bye']: st.info(f"Folga: {curr['bye']['name']}")
 
     with st.form("swiss_res"):
         res = []
@@ -187,30 +197,33 @@ elif st.session_state.phase == 'swiss':
                     vh = r['g1'] > r['g2'] if r['g1'] != r['g2'] else r['p1'] > r['p2']
                     update_team_stats(r['h'], r['g1'], r['g2'], vh); update_team_stats(r['a'], r['g2'], r['g1'], not vh)
                 sync_to_sheets()
-                active = [t for t in st.session_state.teams if t['status'] == 'Ativo']
-                if len(active) <= 1: init_playoffs()
+                if not [t for t in st.session_state.teams if t['status'] == 'Ativo']: init_playoffs()
                 else: generate_swiss_round()
                 st.rerun()
 
 elif st.session_state.phase == 'playoff_gameplay':
     curr_r = st.session_state.playoff_schedule[-1]
-    st.title(f"🔥 {curr_r['name']}")
+    st.title(f"🔥 Fase Eliminatória: {curr_r['name']}")
+    
+    if curr_r['waiting']:
+        st.warning(f"Aguardando na próxima fase: {', '.join([t['name'] for t in curr_r['waiting']])}")
+
     with st.form("playoff_res"):
         res = []
         for i, m in enumerate(curr_r['matches']):
-            st.subheader(m['label'])
+            st.markdown(f"### {m['label']}")
             c1, c2, c3, c4 = st.columns([2,1,1,2])
             with c1: st.write(m['home']['name'])
-            with c2: g1 = st.number_input("G", 0, key=f"pg1_{i}", value=None)
-            with c3: g2 = st.number_input("G", 0, key=f"pg2_{i}", value=None)
+            with c2: g1 = st.number_input("Gols", 0, key=f"pg1_{i}", value=None)
+            with c3: g2 = st.number_input("Gols", 0, key=f"pg2_{i}", value=None)
             with c4: st.write(m['away']['name'])
             p1, p2 = 0, 0
             if st.session_state.playoff_asking_penalties and g1 == g2 and g1 is not None:
-                cp1, cp2 = st.columns(2); p1 = cp1.number_input("Pên", 0, key=f"pp1_{i}"); p2 = cp2.number_input("Pên", 0, key=f"pp2_{i}")
+                cp1, cp2 = st.columns(2); p1 = cp1.number_input("Pênaltis", 0, key=f"pp1_{i}"); p2 = cp2.number_input("Pênaltis", 0, key=f"pp2_{i}")
             res.append({'m':m, 'g1':g1, 'g2':g2, 'p1':p1, 'p2':p2})
         
-        if st.form_submit_button("Avançar"):
-            if any(r['g1'] is None for r in res): st.error("Placares incompletos")
+        if st.form_submit_button("Confirmar Resultados"):
+            if any(r['g1'] is None for r in res): st.error("Preencha todos os gols.")
             elif not st.session_state.playoff_asking_penalties and any(r['g1']==r['g2'] for r in res):
                 st.session_state.playoff_asking_penalties = True; st.rerun()
             else:
@@ -225,7 +238,6 @@ elif st.session_state.phase == 'playoff_gameplay':
 
 elif st.session_state.phase == 'champion':
     st.balloons()
-    st.header(f"🏆 CAMPEÃO: {st.session_state.champion['name']}!")
-    if st.button("Novo Torneio"):
-        st.session_state.clear()
-        st.rerun()
+    st.markdown(f"<h1 style='text-align: center; color: gold;'>🏆 CAMPEÃO: {st.session_state.champion['name']}!</h1>", unsafe_allow_html=True)
+    if st.button("Recomeçar Torneio"):
+        st.session_state.clear(); sync_to_sheets(); st.rerun()
