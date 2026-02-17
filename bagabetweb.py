@@ -3,92 +3,107 @@ import pandas as pd
 import random
 from streamlit_gsheets import GSheetsConnection
 
-# 1. Configuração e Conexão
-st.set_page_config(page_title="BAGA FIX FINAL", layout="wide")
+st.set_page_config(page_title="BAGA GESTOR PRO", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 2. Função de Leitura (ttl=0 para ler na hora o que está no Sheets)
 def carregar():
     try:
         df = conn.read(worksheet="Suico", ttl=0)
-        return df.loc[:, ~df.columns.str.contains('^Unnamed')]
+        df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+        # Garante que as colunas de gols sejam números
+        for col in ['gols_a', 'gols_b']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col]).fillna(0).astype(int)
+            else:
+                df[col] = 0
+        return df
     except:
-        return pd.DataFrame(columns=['torneio_id', 'fase', 'a', 'b', 'finalizado'])
+        return pd.DataFrame(columns=['torneio_id', 'fase', 'rodada', 'a', 'b', 'gols_a', 'gols_b', 'finalizado'])
 
 df_total = carregar()
 
-# 3. Navegação Simples
 if 'torneio_ativo' not in st.session_state:
-    st.title("⚽ GESTOR BAGA")
-    
-    # Criar Novo
-    with st.expander("➕ CRIAR NOVO SUÍÇO"):
-        nome = st.text_input("Nome do Torneio")
-        if st.button("Criar"):
-            if nome:
-                nova_linha = pd.DataFrame([{'torneio_id': nome, 'fase': 'Inscricao', 'finalizado': 'NÃO'}])
-                df_atualizado = pd.concat([df_total, nova_linha], ignore_index=True)
-                conn.update(worksheet="Suico", data=df_atualizado)
-                st.cache_data.clear()
-                st.rerun()
-
-    # Lista de Torneios
-    if not df_total.empty:
-        ids = [str(x) for x in df_total['torneio_id'].dropna().unique() if str(x).strip() != ""]
+    st.title("⚽ BAGA GESTOR PRO")
+    ids = [str(x) for x in df_total['torneio_id'].dropna().unique() if str(x).strip() != ""]
+    if ids:
+        st.subheader("Seus Torneios")
         for tid in sorted(ids):
-            if st.button(f"Entrar: {tid}"):
+            if st.button(f"🏟️ {tid}", use_container_width=True):
                 st.session_state.torneio_ativo = tid
                 st.rerun()
-
 else:
-    # --- ÁREA DO TORNEIO (Onde você está na foto nnnn.png) ---
     tid = st.session_state.torneio_ativo
     st.header(f"🏆 {tid}")
-    
-    if st.button("⬅️ Voltar"):
+    if st.button("⬅️ Sair do Torneio"):
         st.session_state.torneio_ativo = None
         st.rerun()
 
-    aba1, aba2 = st.tabs(["🏟️ Jogos", "⚙️ Admin"])
+    tab1, tab2, tab3 = st.tabs(["🏟️ Jogos", "📊 Classificação", "⚙️ Admin"])
 
-    with aba2: # ABA ADMIN
-        st.subheader("Painel de Controle")
-        
-        # IMPORTANTE: A senha agora é validada e o conteúdo só aparece se estiver correta
-        senha = st.text_input("Digite a Senha para liberar", type="password", key="senha_admin")
-        
+    with tab3: # ADMIN
+        senha = st.text_input("Senha", type="password")
         if senha == "123":
-            st.success("Acesso Liberado! O campo abaixo apareceu:")
-            st.markdown("---")
+            st.success("Logado")
+            with st.expander("Sorteio Inicial"):
+                txt = st.text_area("Times (um por linha)")
+                if st.button("GERAR 1ª RODADA"):
+                    lista = [t.strip() for t in txt.split('\n') if t.strip()]
+                    if len(lista) >= 4:
+                        random.shuffle(lista)
+                        jogos = []
+                        for i in range(0, len(lista), 2):
+                            t1, t2 = lista[i], (lista[i+1] if i+1 < len(lista) else "BYE")
+                            jogos.append({'torneio_id': tid, 'fase': 'Suico', 'rodada': 1, 'a': t1, 'b': t2, 'gols_a': (1 if t2=="BYE" else 0), 'gols_b': 0, 'finalizado': ('SIM' if t2=="BYE" else 'NÃO')})
+                        df_save = pd.concat([df_total[df_total['torneio_id'] != tid], pd.DataFrame(jogos)], ignore_index=True)
+                        conn.update(worksheet="Suico", data=df_save)
+                        st.cache_data.clear()
+                        st.rerun()
             
-            # ESTE É O CAMPO QUE VOCÊ PRECISA
-            texto_times = st.text_area("COLE OS TIMES AQUI (UM POR LINHA)", height=300, placeholder="Time A\nTime B\nTime C...")
-            
-            if st.button("🚀 GERAR JOGOS DA 1ª RODADA"):
-                lista = [t.strip() for t in texto_times.split('\n') if t.strip()]
-                if len(lista) >= 4:
-                    random.shuffle(lista)
-                    jogos_novos = []
-                    for i in range(0, len(lista), 2):
-                        t1 = lista[i]
-                        t2 = lista[i+1] if i+1 < len(lista) else "BYE"
-                        jogos_novos.append({'torneio_id': tid, 'fase': 'Suico', 'a': t1, 'b': t2, 'finalizado': 'NÃO'})
-                    
-                    # Remove o registro de 'Inscricao' e salva as partidas
-                    df_outros = df_total[df_total['torneio_id'] != tid]
-                    df_salvar = pd.concat([df_outros, pd.DataFrame(jogos_novos)], ignore_index=True)
-                    conn.update(worksheet="Suico", data=df_salvar)
-                    st.cache_data.clear()
-                    st.success("Sucesso! Os jogos foram criados.")
-                    st.rerun()
-                else:
-                    st.error("Insira pelo menos 4 times.")
+            if st.button("🚨 EXCLUIR TORNEIO"):
+                conn.update(worksheet="Suico", data=df_total[df_total['torneio_id'] != tid])
+                st.session_state.torneio_ativo = None; st.rerun()
 
-    with aba1: # ABA JOGOS
-        st.subheader("Partidas")
+    with tab1: # JOGOS COM PLACAR
+        st.subheader("Rodada 1")
         meus_jogos = df_total[(df_total['torneio_id'] == tid) & (df_total['fase'] == 'Suico')]
-        if meus_jogos.empty:
-            st.info("Aguardando sorteio no Admin.")
-        else:
-            for _, r in meus_jogos.iterrows():
-                st.write(f"⚽ **{r['a']}** vs **{r['b']}**")
+        for idx, r in meus_jogos.iterrows():
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([2, 1, 2])
+                c1.write(f"**{r['a']}**")
+                c2.write(f"{r['gols_a']} x {r['gols_b']}")
+                c3.write(f"**{r['b']}**")
+                
+                if r['b'] != "BYE":
+                    with st.expander("Editar Placar"):
+                        with st.form(f"form_{idx}"):
+                            ga = st.number_input(f"Gols {r['a']}", 0, 20, int(r['gols_a']))
+                            gb = st.number_input(f"Gols {r['b']}", 0, 20, int(r['gols_b']))
+                            if st.form_submit_button("Salvar"):
+                                df_total.at[idx, 'gols_a'] = ga
+                                df_total.at[idx, 'gols_b'] = gb
+                                df_total.at[idx, 'finalizado'] = 'SIM'
+                                conn.update(worksheet="Suico", data=df_total)
+                                st.cache_data.clear()
+                                st.rerun()
+
+    with tab2: # CLASSIFICAÇÃO REAL
+        st.subheader("Tabela")
+        jogos_fin = meus_jogos[meus_jogos['finalizado'] == 'SIM']
+        stats = {}
+        for _, j in jogos_fin.iterrows():
+            for t in [j['a'], j['b']]:
+                if t not in stats: stats[t] = {'Pts':0, 'PJ':0, 'V':0, 'E':0, 'D':0, 'GP':0, 'GC':0, 'SG':0}
+            if j['b'] == "BYE":
+                stats[j['a']]['Pts'] += 3; stats[j['a']]['PJ'] += 1; stats[j['a']]['V'] += 1; stats[j['a']]['GP'] += 1
+            else:
+                stats[j['a']]['PJ'] += 1; stats[j['b']]['PJ'] += 1
+                stats[j['a']]['GP'] += j['gols_a']; stats[j['a']]['GC'] += j['gols_b']
+                stats[j['b']]['GP'] += j['gols_b']; stats[j['b']]['GC'] += j['gols_a']
+                if j['gols_a'] > j['gols_b']: stats[j['a']]['Pts'] += 3; stats[j['a']]['V'] += 1; stats[j['b']]['D'] += 1
+                elif j['gols_b'] > j['gols_a']: stats[j['b']]['Pts'] += 3; stats[j['b']]['V'] += 1; stats[j['a']]['D'] += 1
+                else: stats[j['a']]['Pts'] += 1; stats[j['b']]['Pts'] += 1; stats[j['a']]['E'] += 1; stats[j['b']]['E'] += 1
+        
+        for t in stats: stats[t]['SG'] = stats[t]['GP'] - stats[t]['GC']
+        tb = pd.DataFrame.from_dict(stats, orient='index').sort_values(by=['Pts', 'V', 'SG', 'GP'], ascending=False)
+        if not tb.empty: st.table(tb)
+        else: st.info("Nenhum jogo finalizado.")
