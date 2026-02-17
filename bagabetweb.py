@@ -99,85 +99,100 @@ def gerar_rodada_suica(df_t, tid):
     return novos, "Rodada Gerada!"
 
 # --- INTERFACE ---
+# --- INICIALIZAÇÃO DE ESTADO ---
 if 'torneio_ativo' not in st.session_state: st.session_state.torneio_ativo = None
+if 'tipo_ativo' not in st.session_state: st.session_state.tipo_ativo = None 
 
+# Carrega os dados das abas
 df_padrao = carregar_dados(ABA_JOGOS)
 df_suico = carregar_dados(ABA_SUICO)
 df_hist = carregar_dados(ABA_HISTORICO)
 
+# --- TELA INICIAL ---
 if st.session_state.torneio_ativo is None:
     st.title("⚽ BAGA GESTOR PRO")
-    with st.expander("📜 HALL DA FAMA"): st.dataframe(df_hist, use_container_width=True)
     
-    # Listar Torneios
-    all_t = list(set((df_padrao['torneio_id'].unique().tolist() if not df_padrao.empty else []) + (df_suico['torneio_id'].unique().tolist() if not df_suico.empty else [])))
-    if all_t:
-        st.subheader("📂 Torneios")
-        c = st.columns(3)
+    with st.expander("📜 HALL DA FAMA"):
+        if not df_hist.empty: st.dataframe(df_hist.sort_index(ascending=False), use_container_width=True)
+    
+    # Identifica torneios existentes em cada aba
+    t_padrao = df_padrao['torneio_id'].unique().tolist() if not df_padrao.empty else []
+    t_suico = df_suico['torneio_id'].unique().tolist() if not df_suico.empty else []
+    
+    # Exibe Torneios Existentes
+    if t_padrao or t_suico:
+        st.subheader("📂 Meus Torneios")
+        all_t = sorted(list(set(t_padrao + t_suico)))
+        cols = st.columns(3)
         for i, t in enumerate(all_t):
-            if c[i%3].button(f"🏆 {t}", use_container_width=True):
+            label = "⭐ " + str(t) if t in t_suico else "🏆 " + str(t)
+            if cols[i%3].button(label, key=f"abrir_{t}", use_container_width=True):
                 st.session_state.torneio_ativo = t
-                st.session_state.tipo_ativo = "SUICO" if t in (df_suico['torneio_id'].unique().tolist() if not df_suico.empty else []) else "PADRAO"
+                # Define o tipo baseado em qual aba o ID foi encontrado
+                st.session_state.tipo_ativo = "SUICO" if t in t_suico else "PADRAO"
                 st.rerun()
 
     st.divider()
+    st.subheader("🆕 Criar Novo")
     c1, c2, c3 = st.columns(3)
+    
     with c1.container(border=True):
-        n = st.text_input("Nome Liga")
-        if st.button("Criar Liga"):
-            salvar_dados(pd.concat([df_padrao, pd.DataFrame([{'torneio_id':n,'formato':'LIGA','fase':'Inscricao'}])]), ABA_JOGOS)
-            st.rerun()
+        st.markdown("### 🏆 LIGA")
+        nl = st.text_input("Nome da Liga", key="input_liga")
+        if st.button("CRIAR LIGA", use_container_width=True):
+            if nl:
+                novo = pd.DataFrame([{'torneio_id':nl,'formato':'LIGA','fase':'Inscricao','finalizado':'NÃO'}])
+                salvar_dados(pd.concat([df_padrao, novo], ignore_index=True), ABA_JOGOS)
+                st.session_state.torneio_ativo = nl
+                st.session_state.tipo_ativo = "PADRAO"
+                st.rerun()
+                
     with c2.container(border=True):
-        n2 = st.text_input("Nome Copa")
-        m = st.selectbox("Modo", ["Só Ida", "Ida e Volta"])
-        if st.button("Criar Copa"):
-            salvar_dados(pd.concat([df_padrao, pd.DataFrame([{'torneio_id':n2,'formato':'COPA','modo_copa':m,'fase':'Inscricao'}])]), ABA_JOGOS)
-            st.rerun()
+        st.markdown("### ⚔️ COPA")
+        nc = st.text_input("Nome da Copa", key="input_copa")
+        mc = st.selectbox("Modo", ["Só Ida", "Ida e Volta"], key="modo_copa_sel")
+        if st.button("CRIAR COPA", use_container_width=True):
+            if nc:
+                novo = pd.DataFrame([{'torneio_id':nc,'formato':'COPA','modo_copa':mc,'fase':'Inscricao','finalizado':'NÃO'}])
+                salvar_dados(pd.concat([df_padrao, novo], ignore_index=True), ABA_JOGOS)
+                st.session_state.torneio_ativo = nc
+                st.session_state.tipo_ativo = "PADRAO"
+                st.rerun()
+                
     with c3.container(border=True):
-        n3 = st.text_input("Nome Suíço")
-        if st.button("Criar Suíço"):
-            salvar_dados(pd.concat([df_suico, pd.DataFrame([{'torneio_id':n3,'formato':'SUICO','fase':'Inscricao'}])]), ABA_SUICO)
-            st.rerun()
+        st.markdown("### ⭐ SUÍÇO (PRO)")
+        ns = st.text_input("Nome do Suíço", key="input_suico")
+        if st.button("CRIAR SUÍÇO", use_container_width=True):
+            if ns:
+                # Importante: Criar com as colunas certas para o Suíço
+                novo = pd.DataFrame([{'torneio_id':ns, 'formato':'SUICO', 'fase':'Inscricao', 'rodada':0, 'finalizado':'NÃO'}])
+                salvar_dados(pd.concat([df_suico, novo], ignore_index=True), ABA_SUICO)
+                st.session_state.torneio_ativo = ns
+                st.session_state.tipo_ativo = "SUICO"
+                st.rerun()
 
 else:
+    # --- DENTRO DO TORNEIO ATIVO ---
     tid = st.session_state.torneio_ativo
     tipo = st.session_state.tipo_ativo
-    df_t = (df_suico if tipo=="SUICO" else df_padrao)[(df_suico if tipo=="SUICO" else df_padrao)['torneio_id']==tid].copy()
     
-    with st.sidebar:
-        st.header(f"🏆 {tid}")
-        menu = st.radio("Menu", ["🏟️ Jogos", "📊 Classificação", "⚙️ Admin"])
-        if st.button("🏠 Sair"): st.session_state.torneio_ativo = None; st.rerun()
-
+    # Seleção do banco de dados correta
     if tipo == "SUICO":
-        if menu == "🏟️ Jogos":
-            for f in sorted(df_t['fase'].unique(), key=lambda x: ORDEM_FASES.get(x, 99)):
-                if f == "Inscricao": continue
-                st.subheader(f"📍 {f}")
-                for idx, r in df_t[df_t['fase']==f].iterrows():
-                    with st.container(border=True):
-                        col1, col2, col3 = st.columns([2,1,2])
-                        col1.write(r['a'])
-                        col3.write(r['b'])
-                        if f == "Suico":
-                            with col2:
-                                if st.button(f"{r['gols_a']} x {r['gols_b']}", key=f"btn_{idx}"):
-                                    st.session_state[f"ed_{idx}"] = True
-                            if st.session_state.get(f"ed_{idx}"):
-                                with st.form(f"f_{idx}"):
-                                    ga, gb = st.columns(2)[0].number_input("A",0,99,int(r['gols_a'])), st.columns(2)[1].number_input("B",0,99,int(r['gols_b']))
-                                    if st.form_submit_button("Salvar"):
-                                        df_suico.loc[idx, ['gols_a','gols_b','finalizado']] = [ga, gb, "SIM"]
-                                        salvar_dados(df_suico, ABA_SUICO); st.rerun()
-                        else:
-                            col2.write(f"({r['ida_a']}) {r['volta_a']} x {r['volta_b']} ({r['ida_b']})")
-                            with st.expander("Editar"):
-                                with st.form(f"fm_{idx}"):
-                                    ia, ib = st.columns(2)[0].number_input("Ida A",0,99), st.columns(2)[1].number_input("Ida B",0,99)
-                                    va, vb = st.columns(2)[0].number_input("Volta A",0,99), st.columns(2)[1].number_input("Volta B",0,99)
-                                    if st.form_submit_button("Ok"):
-                                        df_suico.loc[idx,['ida_a','ida_b','volta_a','volta_b','finalizado']]=[ia,ib,va,vb,"SIM"]
-                                        salvar_dados(df_suico, ABA_SUICO); st.rerun()
+        df_t = df_suico[df_suico['torneio_id'] == tid].copy()
+        db_completo = df_suico # Referência para salvar
+        aba_alvo = ABA_SUICO
+    else:
+        df_t = df_padrao[df_padrao['torneio_id'] == tid].copy()
+        db_completo = df_padrao
+        aba_alvo = ABA_JOGOS
+
+    with st.sidebar:
+        st.header(f"{'⭐' if tipo=='SUICO' else '🏆'} {tid}")
+        menu = st.radio("Menu", ["🏟️ Jogos", "📊 Classificação", "⚙️ Admin"])
+        if st.button("🏠 Voltar ao Início"): 
+            st.session_state.torneio_ativo = None
+            st.session_state.tipo_ativo = None
+            st.rerun()
 
         elif menu == "📊 Classificação":
             stats = calcular_ranking_suico(df_t)
@@ -263,4 +278,5 @@ else:
                             classif = [t for t,s in stats.items() if s['Status']=="Classificado"]
                             # Gerar jogos de Ida e Volta aqui...
                             st.rerun()
+
 
