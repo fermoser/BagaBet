@@ -185,20 +185,72 @@ else:
             st.table(df_rank)
 
         elif menu == "⚙️ Admin":
-            if st.button("Excluir Torneio"):
-                salvar_dados(df_suico[df_suico['torneio_id']!=tid], ABA_SUICO)
-                st.session_state.torneio_ativo = None; st.rerun()
+            st.header("🔐 Painel de Controle (Admin)")
+            senha = st.text_input("Senha de Acesso", type="password")
             
-            if df_t[df_t['fase']=='Suico'].empty:
-                t_list = st.text_area("Times (um por linha)")
-                if st.button("Iniciar"):
-                    times = [x.strip() for x in t_list.split('\n') if x.strip()]
-                    random.shuffle(times)
-                    jogos = []
-                    for i in range(0, len(times), 2):
-                        t1, t2 = times[i], (times[i+1] if i+1 < len(times) else "BYE")
-                        jogos.append({'torneio_id':tid,'formato':'SUICO','fase':'Suico','rodada':1,'a':t1,'b':t2,'finalizado':('SIM' if t2=='BYE' else 'NÃO'),'gols_a':(1 if t2=='BYE' else 0)})
-                    salvar_dados(pd.concat([df_suico, pd.DataFrame(jogos)]), ABA_SUICO); st.rerun()
+            if senha == "123": # Use a sua senha padrão aqui
+                st.success("Acesso Liberado!")
+                
+                # Botão de Excluir sempre visível para o Admin
+                if st.button("🚨 EXCLUIR ESTE TORNEIO"):
+                    df_suico = df_suico[df_suico['torneio_id'] != tid]
+                    salvar_dados(df_suico, ABA_SUICO)
+                    st.session_state.torneio_ativo = None
+                    st.rerun()
+                
+                st.divider()
+
+                # LÓGICA DE INSCRIÇÃO (SÓ APARECE SE NÃO HOUVER JOGOS)
+                jogos_fase_suica = df_t[df_t['fase'] == 'Suico']
+                if jogos_fase_suica.empty:
+                    st.subheader("📝 Iniciar Novo Torneio Suíço")
+                    t_list = st.text_area("Insira a lista de times (um por linha)", height=200, help="Mínimo 6, Máximo 16 times")
+                    
+                    if st.button("🚀 GERAR 1ª RODADA"):
+                        times = [x.strip() for x in t_list.split('\n') if x.strip()]
+                        if 6 <= len(times) <= 16:
+                            random.shuffle(times)
+                            jogos = []
+                            for i in range(0, len(times), 2):
+                                t1 = times[i]
+                                t2 = times[i+1] if i+1 < len(times) else "BYE"
+                                status_bye = "SIM" if t2 == "BYE" else "NÃO"
+                                g_a = 1 if t2 == "BYE" else 0
+                                
+                                jogos.append({
+                                    'torneio_id': tid, 'formato': 'SUICO', 'fase': 'Suico', 
+                                    'rodada': 1, 'a': t1, 'b': t2, 
+                                    'gols_a': g_a, 'gols_b': 0, 'finalizado': status_bye
+                                })
+                            
+                            novo_df = pd.concat([df_suico, pd.DataFrame(jogos)], ignore_index=True)
+                            salvar_dados(novo_df, ABA_SUICO)
+                            st.success("Torneio iniciado com sucesso!")
+                            st.rerun()
+                        else:
+                            st.error("Erro: O formato suíço requer entre 6 e 16 participantes.")
+                
+                # LÓGICA DE PRÓXIMAS RODADAS
+                else:
+                    st.subheader("🎮 Gerenciar Rodadas")
+                    ult_rd = int(jogos_fase_suica['rodada'].max())
+                    pendentes = jogos_fase_suica[(jogos_fase_suica['rodada'] == ult_rd) & (jogos_fase_suica['finalizado'] != "SIM")]
+                    
+                    if pendentes.empty:
+                        st.info(f"✅ Rodada {ult_rd} finalizada.")
+                        if st.button(f"✨ GERAR RODADA {ult_rd + 1}"):
+                            novos_jogos, msg = gerar_rodada_suica(df_t, tid)
+                            if novos_jogos:
+                                novo_df = pd.concat([df_suico, pd.DataFrame(novos_jogos)], ignore_index=True)
+                                salvar_dados(novo_df, ABA_SUICO)
+                                st.rerun()
+                            else:
+                                st.warning(msg)
+                    else:
+                        st.warning(f"Aguardando resultados de {len(pendentes)} jogo(s) da Rodada {ult_rd}.")
+
+            elif senha != "":
+                st.error("Senha incorreta!")
             else:
                 if df_t[df_t['finalizado']!='SIM'].empty:
                     if st.button("Próxima Rodada / Mata-Mata"):
@@ -211,3 +263,4 @@ else:
                             classif = [t for t,s in stats.items() if s['Status']=="Classificado"]
                             # Gerar jogos de Ida e Volta aqui...
                             st.rerun()
+
