@@ -1,198 +1,193 @@
 import streamlit as st
 import pandas as pd
 import random
-from streamlit_gsheets_connection import GSheetsConnection
+from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Bagabet - Gestor Suíço", layout="wide")
-
-# --- CONEXÃO COM GOOGLE SHEETS ---
+# --- CONFIGURAÇÃO ---
+st.set_page_config(page_title="BAGA GESTOR - SUIÇO", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- FUNÇÕES DE BANCO DE DATA (aba "suico") ---
+# --- FUNÇÃO DE SINCRONIZAÇÃO E CRIAÇÃO DE COLUNAS ---
+def sync_to_sheets():
+    """Força a criação das colunas necessárias e salva os dados"""
+    df_save = pd.DataFrame(st.session_state.teams)
+    
+    # Se não houver times, cria um DataFrame vazio com as colunas certas para o DB
+    if df_save.empty:
+        cols = ['id', 'name', 'wins', 'losses', 'goals_for', 'goal_diff', 'received_bye', 'history', 'status']
+        df_save = pd.DataFrame(columns=cols)
+    else:
+        # Converte lista de histórico em string para o Sheets não dar erro
+        df_save['history'] = df_save['history'].apply(lambda x: str(x))
+        
+    conn.update(worksheet="Suico", data=df_save)
 
-def load_data():
-    """Lê os dados diretamente da aba 'suico'"""
-    try:
-        df = conn.read(worksheet="suico", ttl=0)
-        if df.empty:
-            return []
-        # Converte para lista de dicionários para facilitar a lógica do Python
-        data = df.to_dict(orient='records')
-        # Garante que campos numéricos não venham como strings
-        for item in data:
-            item['wins'] = int(item.get('wins', 0))
-            item['losses'] = int(item.get('losses', 0))
-            item['goals_for'] = int(item.get('goals_for', 0))
-            item['goal_diff'] = int(item.get('goal_diff', 0))
-            item['history'] = [] # Cache de confrontos da sessão
-        return data
-    except Exception as e:
-        st.error(f"Erro ao ler planilha: {e}")
-        return []
-
-def save_data():
-    """Salva o estado atual na aba 'suico'"""
-    if st.session_state.teams:
-        try:
-            df_to_save = pd.DataFrame(st.session_state.teams)
-            # Removemos colunas que o Sheets não entende (listas)
-            if 'history' in df_to_save.columns:
-                df_to_save = df_to_save.drop(columns=['history'])
-            
-            conn.update(worksheet="suico", data=df_to_save)
-            st.toast("💾 Sincronizado com a base 'suico'!", icon="✅")
-        except Exception as e:
-            st.error(f"Erro ao salvar: {e}")
-
-# --- INICIALIZAÇÃO DO ESTADO (SESSION STATE) ---
+# --- INICIALIZAÇÃO DO STATE ---
 if 'teams' not in st.session_state:
-    st.session_state.teams = load_data()
-if 'rounds' not in st.session_state:
-    st.session_state.rounds = []
-if 'phase' not in st.session_state:
-    # Se já tem times, assume que o torneio está em curso
-    st.session_state.phase = 'registration' if not st.session_state.teams else 'swiss'
-if 'playoff_schedule' not in st.session_state:
-    st.session_state.playoff_schedule = []
+    # Tenta carregar dados existentes
+    try:
+        df_load = conn.read(worksheet="Suico", ttl=0).dropna(how='all')
+        if not df_load.empty:
+            # Reconverte string de volta para lista no histórico
+            df_load['history'] = df_load['history'].apply(lambda x: eval(x) if isinstance(x, str) else [])
+            st.session_state.teams = df_load.to_dict('records')
+        else:
+            st.session_state.teams = []
+    except:
+        st.session_state.teams = []
 
-# --- LÓGICA DO TORNEIO ---
+# Os demais estados são temporários de sessão (zeram ao fechar o navegador)
+if 'rounds' not in st.session_state: st.session_state.rounds = [] 
+if 'phase' not in st.session_state: st.session_state.phase = 'registration' 
+if 'playoff_schedule' not in st.session_state: st.session_state.playoff_schedule = [] 
+if 'champion' not in st.session_state: st.session_state.champion = None
+if 'swiss_asking_penalties' not in st.session_state: st.session_state.swiss_asking_penalties = False 
+if 'playoff_asking_penalties' not in st.session_state: st.session_state.playoff_asking_penalties = False 
 
-def get_rankings():
-    """Ordenação oficial: Vitórias > Saldo > Gols Pró"""
-    return sorted(st.session_state.teams, 
-                  key=lambda x: (x['wins'], x['goal_diff'], x['goals_for']), 
-                  reverse=True)
+# --- LÓGICA CORE (ORDENAÇÃO FIEL AO SEU MODELO) ---
 
-def update_team(t_id, g_scored, g_conceded, won):
-    for t in st.session_state.teams:
-        if t['id'] == t_id:
-            t['goals_for'] += g_scored
-            t['goal_diff'] += (g_scored - g_conceded)
-            if won: t['wins'] += 1
-            else: t['losses'] += 1
+def get_sorted_rankings(teams, for_pairing=False):
+    if for_pairing:
+        teams = teams.copy()
+        random.shuffle(teams)
+    # Vitórias > Menos Derrotas > Não teve Bye > Saldo > GP
+    return sorted(teams, key=lambda x: (
+        x['wins'], 
+        -x['losses'], 
+        not x['received_bye'], 
+        x['goal_diff'], 
+        x['goals_for']
+    ), reverse=True)
+
+def update_team_stats(team_id, goals_scored, goals_conceded, is_winner, is_bye=False):
+    for team in st.session_state.teams:
+        if team['id'] == team_id:
+            team['goals_for'] += goals_scored
+            team['goal_diff'] += (goals_scored - goals_conceded)
+            if is_winner: team['wins'] += 1
+            else: team['losses'] += 1
+            if is_bye: team['received_bye'] = True
             
-            # Regra de Ouro do Suíço: 3-X
-            if t['wins'] >= 3: t['status'] = 'Classificado'
-            elif t['losses'] >= 3: t['status'] = 'Eliminado'
+            if st.session_state.phase == 'swiss':
+                if team['wins'] >= 3: team['status'] = 'Classificado'
+                elif team['losses'] >= 3: team['status'] = 'Eliminado'
             break
 
-def generate_swiss():
-    active = [t for t in st.session_state.teams if t['status'] == 'Ativo']
-    if not active: return
-    
-    random.shuffle(active)
-    # Lógica de Bye (Folga)
-    bye_team = None
-    if len(active) % 2 != 0:
-        eligible_for_bye = sorted([t for t in active if not t.get('received_bye')], 
-                                  key=lambda x: (x['wins'], x['goal_diff']))
-        bye_team = eligible_for_bye[0] if eligible_for_bye else active[-1]
-        active.remove(bye_team)
-    
-    # Pareamento por Ranking (1º vs 2º, 3º vs 4º...)
-    pool = sorted(active, key=lambda x: (x['wins'], x['goal_diff']), reverse=True)
-    matches = []
-    while len(pool) >= 2:
-        h = pool.pop(0)
-        a = pool.pop(0)
-        matches.append({'home': h['id'], 'away': a['id']})
-    
-    st.session_state.rounds.append({'matches': matches, 'bye': bye_team})
+# --- GERAÇÃO DE RODADAS ---
 
-def start_playoffs():
-    qualified = [t for t in st.session_state.teams if t['status'] == 'Classificado']
-    seeds = sorted(qualified, key=lambda x: (x['wins'], x['goal_diff']), reverse=True)
+def generate_swiss_round():
+    st.session_state.swiss_asking_penalties = False 
+    active_teams = [t for t in st.session_state.teams if t['status'] == 'Ativo']
     
-    # Chaveamento Clássico (1º vs Último)
-    num = len(seeds)
-    m = []
-    if num >= 8:
-        s = seeds[:8]
-        m = [{'home': s[0], 'away': s[7], 'label': 'QF 1'}, {'home': s[1], 'away': s[6], 'label': 'QF 2'},
-             {'home': s[2], 'away': s[5], 'label': 'QF 3'}, {'home': s[3], 'away': s[4], 'label': 'QF 4'}]
-    elif num >= 4:
-        s = seeds[:4]
-        m = [{'home': s[0], 'away': s[3], 'label': 'Semi 1'}, {'home': s[1], 'away': s[2], 'label': 'Semi 2'}]
-    
-    st.session_state.playoff_schedule.append({'name': 'Mata-Mata', 'matches': m})
-    st.session_state.phase = 'playoffs'
+    if not active_teams: return
+
+    # Lógica de Bye
+    bye_team = None
+    if len(active_teams) % 2 != 0:
+        worst_sorted = sorted(active_teams, key=lambda x: (x['wins'], not x['received_bye'], x['goal_diff']))
+        bye_team = next((t for t in worst_sorted if not t['received_bye']), worst_sorted[0])
+        active_teams.remove(bye_team)
+
+    # Pareamento Inédito
+    ranked_pool = get_sorted_rankings(active_teams, for_pairing=True)
+    matches = []
+    while len(ranked_pool) >= 2:
+        home = ranked_pool.pop(0)
+        # Tenta achar alguém que ele ainda não jogou
+        opponent = next((c for c in ranked_pool if c['id'] not in home['history']), ranked_pool[0])
+        ranked_pool.remove(opponent)
+        
+        matches.append({'home': home['id'], 'away': opponent['id']})
+        home['history'].append(opponent['id'])
+        opponent['history'].append(home['id'])
+
+    st.session_state.rounds.append({'matches': matches, 'bye': bye_team})
+    sync_to_sheets()
 
 # --- INTERFACE ---
 
-st.sidebar.title("🏆 Bagabet System")
-if st.sidebar.button("🔄 Resetar Tudo"):
+st.sidebar.title("📊 Classificação")
+if st.session_state.teams:
+    sorted_view = get_sorted_rankings(st.session_state.teams)
+    df_view = pd.DataFrame(sorted_view)[['status', 'name', 'wins', 'losses', 'goal_diff']]
+    st.sidebar.table(df_view)
+
+if st.sidebar.button("🗑️ RESET TOTAL (PLANILHA)"):
     st.session_state.teams = []
-    st.session_state.phase = 'registration'
-    save_data()
+    sync_to_sheets()
     st.rerun()
 
-# Exibe Ranking na lateral
-if st.session_state.teams:
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("📊 Classificação 'suico'")
-    df_rank = pd.DataFrame(get_rankings())
-    st.sidebar.dataframe(df_rank[['name', 'wins', 'losses', 'status']], hide_index=True)
-
-# --- TELAS ---
+# --- FLUXO DE TELAS ---
 
 if st.session_state.phase == 'registration':
-    st.title("Inscrição de Times")
+    st.title("🏆 Inscrição - Sistema Suíço")
     with st.form("add_team"):
-        name = st.text_input("Nome da Equipe")
-        if st.form_submit_button("Cadastrar"):
-            st.session_state.teams.append({
-                'id': len(st.session_state.teams)+1, 'name': name, 'wins': 0, 'losses': 0,
-                'goals_for': 0, 'goal_diff': 0, 'status': 'Ativo', 'received_bye': False
-            })
-            save_data()
-            st.rerun()
-    
+        new_n = st.text_input("Nome do Time")
+        if st.form_submit_button("Adicionar"):
+            if new_n:
+                new_id = max([t['id'] for t in st.session_state.teams], default=0) + 1
+                st.session_state.teams.append({
+                    'id': new_id, 'name': new_n, 'wins': 0, 'losses': 0, 
+                    'goals_for': 0, 'goal_diff': 0, 'received_bye': False, 
+                    'history': [], 'status': 'Ativo'
+                })
+                sync_to_sheets()
+                st.rerun()
+
     if len(st.session_state.teams) >= 6:
-        if st.button("🚀 Começar Torneio"):
+        if st.button("🚀 Iniciar Torneio"):
             st.session_state.phase = 'swiss'
-            generate_swiss()
-            save_data()
+            generate_swiss_round()
             st.rerun()
 
 elif st.session_state.phase == 'swiss':
-    st.title(f"⚔️ Rodada Suíça {len(st.session_state.rounds)}")
+    round_num = len(st.session_state.rounds)
+    st.title(f"⚔️ Rodada {round_num}")
     curr = st.session_state.rounds[-1]
     
     if curr['bye']:
-        st.warning(f"Folga: **{curr['bye']['name']}** (+1 Vitória)")
+        st.warning(f"Folga da Rodada: {curr['bye']['name']} (+1 Vitória)")
 
-    with st.form("round_results"):
-        res_list = []
+    with st.form(f"results_{round_num}"):
+        match_results = []
         for i, m in enumerate(curr['matches']):
             t1 = next(t for t in st.session_state.teams if t['id'] == m['home'])
             t2 = next(t for t in st.session_state.teams if t['id'] == m['away'])
-            c1, c2, c3, c4 = st.columns([2,1,1,2])
-            with c1: st.write(t1['name'])
-            with c2: g1 = st.number_input("G", 0, key=f"g1_{i}")
-            with c3: g2 = st.number_input("G", 0, key=f"g2_{i}")
-            with c4: st.write(t2['name'])
-            res_list.append((t1['id'], t2['id'], g1, g2))
-        
-        if st.form_submit_button("Finalizar Rodada"):
-            if curr['bye']: update_team(curr['bye']['id'], 1, 0, True)
-            for r in res_list:
-                update_team(r[0], r[2], r[3], r[2] > r[3])
-                update_team(r[1], r[3], r[2], r[3] > r[2])
             
-            save_data()
+            col1, col2, col3, col4 = st.columns([2,1,1,2])
+            with col1: st.markdown(f"**{t1['name']}**")
+            with col2: g1 = st.number_input("Gols", 0, 50, key=f"g1_{i}", value=None)
+            with col3: g2 = st.number_input("Gols", 0, 50, key=f"g2_{i}", value=None)
+            with col4: st.markdown(f"**{t2['name']}**")
             
-            # Verifica se encerra fase suíça
-            ativos = [t for t in st.session_state.teams if t['status'] == 'Ativo']
-            if len(ativos) <= 1:
-                start_playoffs()
-            else:
-                generate_swiss()
-            st.rerun()
+            p1, p2 = 0, 0
+            if st.session_state.swiss_asking_penalties and g1 == g2 and g1 is not None:
+                c_pen1, c_pen2 = st.columns(2)
+                with c_pen1: p1 = st.number_input(f"Pênaltis {t1['name']}", 0, 20, key=f"p1_{i}")
+                with c_pen2: p2 = st.number_input(f"Pênaltis {t2['name']}", 0, 20, key=f"p2_{i}")
+            
+            match_results.append({'h': t1['id'], 'a': t2['id'], 'g1': g1, 'g2': g2, 'p1': p1, 'p2': p2})
 
-elif st.session_state.phase == 'playoffs':
-    st.title("🔥 FASE FINAL (Mata-Mata)")
-    playoff = st.session_state.playoff_schedule[-1]
-    st.subheader(playoff['name'])
-    st.info("Critério aplicado: 1º vs Último.")
-    # (Interface de resultados do Mata-Mata seguindo a mesma lógica...)
+        if st.form_submit_button("Confirmar Resultados"):
+            if any(r['g1'] is None or r['g2'] is None for r in match_results):
+                st.error("Preencha todos os placares.")
+            elif not st.session_state.swiss_asking_penalties and any(r['g1'] == r['g2'] for r in match_results):
+                st.session_state.swiss_asking_penalties = True
+                st.rerun()
+            else:
+                # Processa Bye
+                if curr['bye']: update_team_stats(curr['bye']['id'], 1, 0, True, True)
+                # Processa Jogos
+                for r in match_results:
+                    vence_h = r['g1'] > r['g2'] if r['g1'] != r['g2'] else r['p1'] > r['p2']
+                    update_team_stats(r['h'], r['g1'], r['g2'], vence_h)
+                    update_team_stats(r['a'], r['g2'], r['g1'], not vence_h)
+                
+                sync_to_sheets()
+                active = [t for t in st.session_state.teams if t['status'] == 'Ativo']
+                if len(active) <= 1:
+                    st.success("Fase Suíça encerrada! Próximo passo: Mata-Mata.")
+                    # Aqui você pode chamar a função init_playoffs() do seu modelo
+                else:
+                    generate_swiss_round()
+                st.rerun()
