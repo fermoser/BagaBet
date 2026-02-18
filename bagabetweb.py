@@ -24,7 +24,6 @@ def build_playoffs():
         return
     
     st.session_state.waiting_next = []
-    # Reseta estrelas para começar o cálculo do mata-mata
     for t in st.session_state.teams: t['received_bye'] = False
 
     if n == 6:
@@ -39,7 +38,6 @@ def build_playoffs():
     else:
         to_play = qualified
         
-    # MARCA ESTRELA PARA QUEM ESTÁ DE BYE NO MATA-MATA
     waiting_ids = [w['id'] for w in st.session_state.waiting_next]
     for t in st.session_state.teams:
         if t['id'] in waiting_ids: t['received_bye'] = True
@@ -55,8 +53,6 @@ with st.sidebar:
         df = pd.DataFrame(st.session_state.teams).sort_values(by=['wins', 'goal_diff'], ascending=[False, False])
         df_view = df[['name', 'wins', 'losses', 'goal_diff', 'received_bye', 'status']].copy()
         df_view.columns = ['Time', 'V', 'D', 'SG', 'Bye', 'Status']
-        
-        # GARANTE A ESTRELA NO BYE
         df_view['Bye'] = df_view['Bye'].apply(lambda x: "⭐" if x else "")
 
         def color_status(val):
@@ -82,7 +78,6 @@ if st.session_state.phase == 'setup':
             st.session_state.phase = 'swiss'
             p = st.session_state.teams.copy(); random.shuffle(p)
             b = p.pop() if len(p)%2 != 0 else None
-            # Marca estrela no primeiro Bye do Suíço
             if b:
                 for t in st.session_state.teams:
                     if t['id'] == b['id']: t['received_bye'] = True
@@ -102,7 +97,6 @@ elif st.session_state.phase == 'swiss':
             g1, g2 = g1c.number_input(t1['name'], 0, key=f"s1{i}"), g2c.number_input(t2['name'], 0, key=f"s2{i}")
             res.append({'h': t1, 'a': t2, 'g1': g1, 'g2': g2})
         if st.form_submit_button("Confirmar Rodada"):
-            # Processa Bye anterior e prepara o próximo
             if curr.get('bye'):
                 for t in st.session_state.teams:
                     if t['id'] == curr['bye']['id']: t['wins'] += 1
@@ -110,19 +104,15 @@ elif st.session_state.phase == 'swiss':
                 r['h']['goal_diff'] += (r['g1']-r['g2']); r['a']['goal_diff'] += (r['g2']-r['g1'])
                 if r['g1'] > r['g2']: r['h']['wins'] += 1; r['a']['losses'] += 1
                 else: r['a']['wins'] += 1; r['h']['losses'] += 1
-            
             for t in st.session_state.teams:
                 if t['wins'] >= 3: t['status'] = 'Classificado'
                 elif t['losses'] >= 3: t['status'] = 'Eliminado'
-            
             ativos = [t for t in st.session_state.teams if t['status'] == 'Ativo']
             if not ativos: st.session_state.phase = 'end_swiss'
             else:
                 p = sorted(ativos, key=lambda x: (x['wins'], -x['losses']), reverse=True)
-                # Limpa estrelas antigas antes da nova rodada
                 for t in st.session_state.teams: t['received_bye'] = False
                 b = p.pop() if len(p)%2 != 0 else None
-                # Marca estrela no novo Bye
                 if b:
                     for t in st.session_state.teams:
                         if t['id'] == b['id']: t['received_bye'] = True
@@ -136,7 +126,6 @@ elif st.session_state.phase == 'end_swiss':
 elif st.session_state.phase == 'playoff':
     st.title("🔥 Eliminatórias")
     venc, derr, ready = [], [], True
-    
     for idx, p_round in enumerate(st.session_state.playoffs):
         st.subheader(p_round['label'])
         for i, m in enumerate(p_round['matches']):
@@ -147,14 +136,12 @@ elif st.session_state.phase == 'playoff':
                 pc1, pc2 = st.columns(2)
                 p1, p2 = pc1.number_input(f"Pên {m['home']['name']}", 0, key=f"p1{idx}{i}"), pc2.number_input(f"Pên {m['away']['name']}", 0, key=f"p2{idx}{i}")
                 if p1 == p2: ready = False
-            
             if g1 > g2 or (g1 == g2 and p1 > p2):
                 venc.append({'t': m['home'], 'lbl': p_round['label']})
                 derr.append({'t': m['away'], 'lbl': p_round['label']})
             else:
                 venc.append({'t': m['away'], 'lbl': p_round['label']})
                 derr.append({'t': m['home'], 'lbl': p_round['label']})
-
     if st.button("Confirmar Resultados"):
         if ready:
             final_match = next((v for v in venc if v['lbl'] == "Grande Final"), None)
@@ -165,18 +152,15 @@ elif st.session_state.phase == 'playoff':
                 if third_match: st.session_state.third_place = third_match['t']
                 st.session_state.phase = 'champion'
             else:
-                # Progressão e cálculo de novos Byes no Mata-Mata
                 proximos = st.session_state.waiting_next + [v['t'] for v in venc]
                 st.session_state.waiting_next = []
-                for t in st.session_state.teams: t['received_bye'] = False # Limpa estrelas
-                
+                for t in st.session_state.teams: t['received_bye'] = False
                 if len(proximos) == 2:
                     st.session_state.playoffs = [{'label': "Grande Final", 'matches': [{'home': proximos[0], 'away': proximos[1]}]}]
                     if len(derr) >= 2:
                         st.session_state.playoffs.append({'label': "Disputa de 3º Lugar", 'matches': [{'home': derr[0]['t'], 'away': derr[1]['t']}]})
-                elif len(proximos) == 3: # Caso de Bye no mata-mata
+                elif len(proximos) == 3:
                     st.session_state.waiting_next = [proximos[0]]
-                    # Ativa estrela para o Bye da próxima rodada
                     for t in st.session_state.teams:
                         if t['id'] == proximos[0]['id']: t['received_bye'] = True
                     st.session_state.playoffs = [{'label': "Próxima Fase", 'matches': [{'home': proximos[1], 'away': proximos[2]}]}]
@@ -187,11 +171,19 @@ elif st.session_state.phase == 'playoff':
 
 elif st.session_state.phase == 'champion':
     st.balloons()
-    st.markdown("<h1 style='text-align: center;'>🏆 PÓDIO FINAL</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #FFD700;'>🏆 PÓDIO FINAL 🏆</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     if st.session_state.second_place: c1.info(f"🥈 **2º LUGAR**\n\n{st.session_state.second_place['name']}")
     if st.session_state.champion: c2.success(f"🥇 **CAMPEÃO**\n\n# {st.session_state.champion['name']}")
     if st.session_state.third_place: c3.warning(f"🥉 **3º LUGAR**\n\n{st.session_state.third_place['name']}")
+    
+    st.divider()
+    st.subheader("📊 Tabela Final de Resultados")
+    df_final = pd.DataFrame(st.session_state.teams).sort_values(by=['wins', 'goal_diff'], ascending=[False, False])
+    df_final_view = df_final[['name', 'wins', 'losses', 'goal_diff']].copy()
+    df_final_view.columns = ['Equipe', 'Vitórias Totais', 'Derrotas Totais', 'Saldo de Gols']
+    st.table(df_final_view)
+
     if st.button("🔄 Novo Torneio"):
         for k in keys: st.session_state[k] = keys[k]
         st.rerun()
