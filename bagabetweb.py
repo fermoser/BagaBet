@@ -26,7 +26,6 @@ def build_playoffs():
     st.session_state.waiting_next = []
     for t in st.session_state.teams: t['received_bye'] = False
 
-    # Lógica de Byes (Ex: 6 times -> 2 esperam, 4 jogam)
     if n == 6:
         st.session_state.waiting_next = qualified[:2]
         to_play = qualified[2:]
@@ -46,14 +45,24 @@ def build_playoffs():
     st.session_state.playoffs = [{'label': "Mata-Mata", 'matches': matches}]
     st.session_state.phase = 'playoff'
 
-# --- SIDEBAR ---
+# --- SIDEBAR COM TABELA COLORIDA ---
 with st.sidebar:
     st.title("📊 Ranking")
     if st.session_state.teams:
         df = pd.DataFrame(st.session_state.teams).sort_values(by=['wins', 'goal_diff'], ascending=[False, False])
         df_view = df[['name', 'wins', 'losses', 'goal_diff', 'received_bye', 'status']].copy()
-        df_view['received_bye'] = df_view['received_bye'].apply(lambda x: "⭐" if x else "")
-        st.dataframe(df_view, hide_index=True)
+        df_view.columns = ['Time', 'V', 'D', 'SG', 'Bye', 'Status']
+        df_view['Bye'] = df_view['Bye'].apply(lambda x: "⭐" if x else "")
+
+        # FUNÇÃO PARA PINTAR O STATUS
+        def color_status(val):
+            if val == 'Classificado': color = '#d4edda' # Verde
+            elif val == 'Eliminado': color = '#f8d7da'  # Vermelho
+            else: color = '#cce5ff'                    # Azul (Ativo)
+            return f'background-color: {color}; color: black; font-weight: bold'
+
+        st.dataframe(df_view.style.applymap(color_status, subset=['Status']), hide_index=True)
+    
     if st.button("🗑️ Reset"):
         for k in keys: st.session_state[k] = keys[k]
         st.rerun()
@@ -64,7 +73,7 @@ if st.session_state.phase == 'setup':
     num = st.number_input("Equipes", 2, 32, 8)
     with st.form("f1"):
         names = [st.text_input(f"Time {i+1}", f"Equipe {i+1}", key=f"i{i}") for i in range(num)]
-        if st.form_submit_button("Gerar"):
+        if st.form_submit_button("Gerar Torneio"):
             st.session_state.teams = [{'id': i, 'name': n, 'wins': 0, 'losses': 0, 'goal_diff': 0, 'received_bye': False, 'status': 'Ativo'} for i, n in enumerate(names)]
             st.session_state.phase = 'swiss'
             p = st.session_state.teams.copy(); random.shuffle(p)
@@ -123,6 +132,7 @@ elif st.session_state.phase == 'playoff':
                 p1, p2 = pc1.number_input(f"Pên {m['home']['name']}", 0, key=f"p1{idx}{i}"), pc2.number_input(f"Pên {m['away']['name']}", 0, key=f"p2{idx}{i}")
                 if p1 == p2: ready = False
             
+            # Armazena quem venceu e quem perdeu com a etiqueta da fase
             if g1 > g2 or (g1 == g2 and p1 > p2):
                 venc.append({'t': m['home'], 'lbl': p_round['label']})
                 derr.append({'t': m['away'], 'lbl': p_round['label']})
@@ -132,7 +142,7 @@ elif st.session_state.phase == 'playoff':
 
     if st.button("Confirmar e Avançar"):
         if ready:
-            # Checa se a Final foi jogada
+            # Busca se houve uma "Grande Final" nesta rodada
             final_match = next((v for v in venc if v['lbl'] == "Grande Final"), None)
             if final_match:
                 st.session_state.champion = final_match['t']
@@ -141,16 +151,17 @@ elif st.session_state.phase == 'playoff':
                 if third_match: st.session_state.third_place = third_match['t']
                 st.session_state.phase = 'champion'
             else:
-                # Lógica de progressão
+                # Progressão para a próxima fase
                 proximos = st.session_state.waiting_next + [v['t'] for v in venc]
                 st.session_state.waiting_next = []
                 for t in st.session_state.teams: t['received_bye'] = False
                 
                 if len(proximos) == 2:
-                    st.session_state.playoffs = [
-                        {'label': "Grande Final", 'matches': [{'home': proximos[0], 'away': proximos[1]}]},
-                        {'label': "Disputa de 3º Lugar", 'matches': [{'home': derr[0]['t'], 'away': derr[1]['t']}]}
-                    ]
+                    # CONFIGURAÇÃO DA FINAL E 3º LUGAR SEM ERRO DE ÍNDICE
+                    st.session_state.playoffs = [{'label': "Grande Final", 'matches': [{'home': proximos[0], 'away': proximos[1]}]}]
+                    # Só adiciona disputa de 3º lugar se houver perdedores da rodada anterior (Semi)
+                    if len(derr) >= 2:
+                        st.session_state.playoffs.append({'label': "Disputa de 3º Lugar", 'matches': [{'home': derr[0]['t'], 'away': derr[1]['t']}]})
                 else:
                     proximos = sorted(proximos, key=lambda x: (x['wins'], x['goal_diff']), reverse=True)
                     st.session_state.playoffs = [{'label': "Próxima Fase", 'matches': [{'home': proximos[i], 'away': proximos[-(i+1)]} for i in range(len(proximos)//2)]}]
@@ -163,6 +174,6 @@ elif st.session_state.phase == 'champion':
     if st.session_state.second_place: c1.info(f"🥈 **2º LUGAR**\n\n{st.session_state.second_place['name']}")
     if st.session_state.champion: c2.success(f"🥇 **CAMPEÃO**\n\n# {st.session_state.champion['name']}")
     if st.session_state.third_place: c3.warning(f"🥉 **3º LUGAR**\n\n{st.session_state.third_place['name']}")
-    if st.button("🔄 Iniciar Novo"):
+    if st.button("🔄 Novo Torneio"):
         for k in keys: st.session_state[k] = keys[k]
         st.rerun()
