@@ -14,8 +14,9 @@ for key, value in keys.items():
 
 # --- FUNÇÕES ---
 def get_rankings():
+    # Lógica Completa: Vitórias > Saldo > Gols Pró > Menos Gols Contra > Menos Derrotas
     return sorted(st.session_state.teams, 
-                  key=lambda x: (x['wins'], x['goal_diff'], x['goals_for'], -x['goals_against']), 
+                  key=lambda x: (x['wins'], x['goal_diff'], x['goals_for'], -x['goals_against'], -x['losses']), 
                   reverse=True)
 
 def build_playoffs():
@@ -52,12 +53,14 @@ def build_playoffs():
 with st.sidebar:
     st.title("📊 Ranking")
     if st.session_state.teams:
+        # Ordenação para exibição lateral
         df = pd.DataFrame(st.session_state.teams).sort_values(
-            by=['wins', 'goal_diff', 'goals_for', 'goals_against'], 
-            ascending=[False, False, False, True]
+            by=['wins', 'goal_diff', 'goals_for', 'goals_against', 'losses'], 
+            ascending=[False, False, False, True, True]
         )
-        df_view = df[['name', 'wins', 'goal_diff', 'goals_for', 'goals_against', 'received_bye', 'status']].copy()
-        df_view.columns = ['Time', 'V', 'SG', 'GP', 'GC', 'Bye', 'Status']
+        # RECOLOCANDO A COLUNA DE DERROTAS (losses)
+        df_view = df[['name', 'wins', 'losses', 'goal_diff', 'goals_for', 'goals_against', 'received_bye', 'status']].copy()
+        df_view.columns = ['Time', 'V', 'D', 'SG', 'GP', 'GC', 'Bye', 'Status']
         df_view['Bye'] = df_view['Bye'].apply(lambda x: "⭐" if x else "")
 
         def color_status(val):
@@ -66,7 +69,6 @@ with st.sidebar:
             else: color = '#cce5ff'
             return f'background-color: {color}; color: black; font-weight: bold'
 
-        # CORREÇÃO DO ERRO: Calculando altura dinâmica para evitar o scroll e o erro de height=None
         calc_height = (len(df_view) + 1) * 35 + 3
         st.dataframe(df_view.style.applymap(color_status, subset=['Status']), hide_index=True, height=calc_height)
     
@@ -130,7 +132,7 @@ elif st.session_state.phase == 'swiss':
             ativos = [t for t in st.session_state.teams if t['status'] == 'Ativo']
             if not ativos: st.session_state.phase = 'end_swiss'
             else:
-                p = sorted(ativos, key=lambda x: (x['wins'], x['goal_diff'], x['goals_for'], -x['goals_against']), reverse=True)
+                p = sorted(ativos, key=lambda x: (x['wins'], x['goal_diff'], x['goals_for'], -x['goals_against'], -x['losses']), reverse=True)
                 for t in st.session_state.teams: t['received_bye'] = False
                 b = p.pop() if len(p)%2 != 0 else None
                 if b:
@@ -172,6 +174,8 @@ elif st.session_state.phase == 'playoff':
                 t_obj = next(t for t in st.session_state.teams if t['id'] == item['t']['id'])
                 t_obj['goals_for'] += item['g']; t_obj['goals_against'] += item['gc']
                 t_obj['goal_diff'] = t_obj['goals_for'] - t_obj['goals_against']
+                # Gols no mata-mata também podem causar uma derrota no ranking geral
+                if item in derr: t_obj['losses'] += 1
 
             final_match = next((v for v in venc if v['lbl'] == "Grande Final"), None)
             if final_match:
@@ -190,7 +194,7 @@ elif st.session_state.phase == 'playoff':
                     if len(derr) >= 2:
                         st.session_state.playoffs.append({'label': "Disputa de 3º Lugar", 'matches': [{'home': derr[0]['t'], 'away': derr[1]['t']}]})
                 else:
-                    proximos = sorted(proximos, key=lambda x: (x['wins'], x['goal_diff'], x['goals_for'], -x['goals_against']), reverse=True)
+                    proximos = sorted(proximos, key=lambda x: (x['wins'], x['goal_diff'], x['goals_for'], -x['goals_against'], -x['losses']), reverse=True)
                     st.session_state.playoffs = [{'label': "Próxima Fase", 'matches': [{'home': proximos[i], 'away': proximos[-(i+1)]} for i in range(len(proximos)//2)]}]
             st.rerun()
 
@@ -205,11 +209,11 @@ elif st.session_state.phase == 'champion':
     st.divider()
     st.subheader("📊 Classificação Geral Final")
     df_final = pd.DataFrame(st.session_state.teams).sort_values(
-        by=['wins', 'goal_diff', 'goals_for', 'goals_against'], 
-        ascending=[False, False, False, True]
+        by=['wins', 'goal_diff', 'goals_for', 'goals_against', 'losses'], 
+        ascending=[False, False, False, True, True]
     )
-    df_final_view = df_final[['name', 'wins', 'goal_diff', 'goals_for', 'goals_against']].copy()
-    df_final_view.columns = ['Equipe', 'Vitórias', 'Saldo de Gols', 'Gols Pró', 'Gols Contra']
+    df_final_view = df_final[['name', 'wins', 'losses', 'goal_diff', 'goals_for', 'goals_against']].copy()
+    df_final_view.columns = ['Equipe', 'Vitórias', 'Derrotas', 'Saldo de Gols', 'Gols Pró', 'Gols Contra']
     st.table(df_final_view)
 
     if st.button("🔄 Iniciar Novo Torneio"):
