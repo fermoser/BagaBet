@@ -22,26 +22,52 @@ def get_rankings():
 def build_playoffs():
     qualified = [t for t in get_rankings() if t['status'] == 'Classificado']
     n = len(qualified)
+    
     if n == 0:
         st.error("Ninguém classificado!")
         return
 
     matches = []
+    # Limpa e reinicia a espera
     st.session_state.waiting_next = []
 
-    if n in [3, 5, 6, 7]:
-        st.session_state.waiting_next = [qualified[0]]
-        to_play = qualified[1:]
-        matches = [{'home': to_play[i], 'away': to_play[-(i+1)], 'label': f'Jogo Preliminar {i+1}'} for i in range(len(to_play)//2)]
-        label = "Rodada de Acesso (1º aguarda)"
+    # LÓGICA CORRIGIDA: Se o número for 2, 4, 8, 16... (Potência de 2)
+    # Faz o chaveamento direto. 
+    # Se não for (ex: 3, 5, 6, 7, 9...), os melhores da tabela ganham BYE (esperam)
+    
+    # Lista de potências de 2 para conferência
+    potencias_de_2 = [2, 4, 8, 16, 32]
+    
+    if n not in potencias_de_2:
+        # Quantos jogos PODEMOS fazer para chegar mais perto de uma potência de 2?
+        # Ex: Se temos 6, fazemos 2 jogos (sobram 2 + 2 vencedores = 4 para a próxima)
+        if n == 6:
+            st.session_state.waiting_next = qualified[:2] # 1º e 2º esperam
+            to_play = qualified[2:] # 3º, 4º, 5º e 6º jogam
+        elif n == 3:
+            st.session_state.waiting_next = [qualified[0]] # 1º espera
+            to_play = qualified[1:] # 2º e 3º jogam
+        elif n == 5:
+            st.session_state.waiting_next = [qualified[0], qualified[1], qualified[2]] # 1, 2 e 3 esperam
+            to_play = qualified[3:] # 4º e 5º jogam
+        elif n == 7:
+            st.session_state.waiting_next = [qualified[0]] # 1º espera
+            to_play = qualified[1:] # 2, 3, 4, 5, 6, 7 jogam
+        else:
+            # Fallback genérico para outros números ímpares
+            st.session_state.waiting_next = [qualified[0]]
+            to_play = qualified[1:]
+        
+        matches = [{'home': to_play[i], 'away': to_play[-(i+1)], 'label': f'Rodada Preliminar {i+1}'} for i in range(len(to_play)//2)]
+        label = "Rodada de Acesso (Melhores aguardam)"
+    
     else:
-        if n >= 8:
-            top8 = qualified[:8]
-            matches = [{'home': top8[i], 'away': top8[7-i], 'label': f'Quartas {i+1}'} for i in range(4)]
+        # Chaveamento Perfeito (2, 4, 8)
+        if n == 8:
+            matches = [{'home': qualified[i], 'away': qualified[7-i], 'label': f'Quartas {i+1}'} for i in range(4)]
             label = "Quartas de Final"
-        elif n >= 4:
-            top4 = qualified[:4]
-            matches = [{'home': top4[i], 'away': top4[3-i], 'label': f'Semi {i+1}'} for i in range(2)]
+        elif n == 4:
+            matches = [{'home': qualified[i], 'away': qualified[3-i], 'label': f'Semi {i+1}'} for i in range(2)]
             label = "Semifinais"
         else:
             matches = [{'home': qualified[0], 'away': qualified[1], 'label': 'Grande Final'}]
@@ -49,7 +75,6 @@ def build_playoffs():
 
     st.session_state.playoffs.append({'label': label, 'matches': matches})
     st.session_state.phase = 'playoff'
-
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("📊 Ranking")
@@ -176,3 +201,4 @@ elif st.session_state.phase == 'champion':
     st.balloons()
     st.markdown(f"<h1 style='text-align: center; color: #FFD700;'>🏆 CAMPEÃO: {st.session_state.champion['name']}</h1>", unsafe_allow_html=True)
     if st.button("Novo Torneio"): st.session_state.clear(); st.rerun()
+
