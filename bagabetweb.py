@@ -1,9 +1,19 @@
 import streamlit as st
 import pandas as pd
 import random
+from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="BAGA GESTOR PRO", layout="wide", page_icon="🏆")
+
+# --- CONEXÃO GOOGLE SHEETS ---
+# Tenta conectar. Se falhar, avisa o usuário mas não quebra o app.
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    SHEET_ENABLED = True
+except Exception as e:
+    st.error(f"Erro na conexão com Google Sheets: {e}")
+    SHEET_ENABLED = False
 
 # --- INICIALIZAÇÃO ---
 keys = {'teams': [], 'phase': 'setup', 'rounds': [], 'playoffs': [], 'waiting_next': [], 
@@ -12,8 +22,23 @@ keys = {'teams': [], 'phase': 'setup', 'rounds': [], 'playoffs': [], 'waiting_ne
 for key, value in keys.items():
     if key not in st.session_state: st.session_state[key] = value
 
-# --- FUNÇÕES ---
+# --- FUNÇÃO PARA SALVAR NO SHEETS ---
+def save_to_sheets():
+    if not SHEET_ENABLED or not st.session_state.teams: return
+    
+    try:
+        # Prepara o DataFrame exatamente como está na memória
+        df_export = pd.DataFrame(st.session_state.teams)
+        
+        # Salva na aba "suico" (sobrescreve os dados anteriores para atualizar a tabela)
+        conn.update(worksheet="suico", data=df_export)
+        st.toast("✅ Dados salvos no Google Sheets (Aba: suico)!")
+    except Exception as e:
+        st.warning(f"Não foi possível salvar no Sheets: {e}")
+
+# --- FUNÇÕES DE LÓGICA ---
 def get_rankings():
+    # V > SG > GP > Menos GC > Menos D
     return sorted(st.session_state.teams, 
                   key=lambda x: (x['wins'], x['goal_diff'], x['goals_for'], -x['goals_against'], -x['losses']), 
                   reverse=True)
@@ -48,17 +73,17 @@ def build_playoffs():
     st.session_state.playoffs = [{'label': "Mata-Mata", 'matches': matches}]
     st.session_state.phase = 'playoff'
 
-# --- SIDEBAR AJUSTADA ---
+# --- SIDEBAR (Ranking Lateral) ---
 with st.sidebar:
-    st.title("📊 Ranking")
+    st.title("📊 Ranking ao Vivo")
     if st.session_state.teams:
         df = pd.DataFrame(st.session_state.teams).sort_values(
             by=['wins', 'goal_diff', 'goals_for', 'goals_against', 'losses'], 
             ascending=[False, False, False, True, True]
         )
-        # Selecionando colunas na ordem correta
+        
+        # Colunas e Visualização
         df_view = df[['name', 'wins', 'losses', 'goal_diff', 'goals_for', 'goals_against', 'received_bye', 'status']].copy()
-        # Cabeçalhos ultra compactos para caber na lateral
         df_view.columns = ['Time', 'V', 'D', 'SG', 'GP', 'GC', '⭐', 'Status']
         df_view['⭐'] = df_view['⭐'].apply(lambda x: "⭐" if x else "")
 
@@ -69,21 +94,22 @@ with st.sidebar:
             return f'background-color: {color}; color: black; font-weight: bold'
 
         calc_height = (len(df_view) + 1) * 35 + 3
-        # use_container_width garante que ele use o máximo de largura da sidebar
         st.dataframe(
             df_view.style.applymap(color_status, subset=['Status']), 
             hide_index=True, 
             height=calc_height,
-            use_container_width=True 
+            use_container_width=True
         )
     
     if st.button("🗑️ Reset Total"):
         for k in keys: st.session_state[k] = keys[k]
         st.rerun()
 
-# --- TELAS ---
+# --- TELAS PRINCIPAIS ---
+
+# 1. SETUP
 if st.session_state.phase == 'setup':
-    st.title("🏆 Configuração")
+    st.title("🏆 Configuração Inicial")
     num = st.number_input("Número de Equipes", 2, 64, 8)
     with st.form("f1"):
         names = [st.text_input(f"Time {i+1}", f"Equipe {i+1}", key=f"i{i}") for i in range(num)]
@@ -93,19 +119,25 @@ if st.session_state.phase == 'setup':
                 'goal_diff': 0, 'goals_for': 0, 'goals_against': 0,
                 'received_bye': False, 'status': 'Ativo'
             } for i, n in enumerate(names)]
+            
+            # Sorteio 1ª Rodada
             st.session_state.phase = 'swiss'
             p = st.session_state.teams.copy(); random.shuffle(p)
             b = p.pop() if len(p)%2 != 0 else None
             if b:
                 for t in st.session_state.teams:
                     if t['id'] == b['id']: t['received_bye'] = True
+            
             st.session_state.rounds = [{'matches': [{'home': p[i]['id'], 'away': p[i+1]['id']} for i in range(0, len(p), 2)], 'bye': b}]
+            
+            save_to_sheets() # Salva o estado inicial
             st.rerun()
 
+# 2. FASE SUÍÇA
 elif st.session_state.phase == 'swiss':
     st.title(f"⚽ Fase Suíça - Rodada {len(st.session_state.rounds)}")
     curr = st.session_state.rounds[-1]
-    if curr.get('bye'): st.warning(f"⭐ Folga (Ganhou 1 Vitória): {curr['bye']['name']}")
+    if curr.get('bye'): st.warning(f"⭐ Folga (Bye): {curr['bye']['name']}")
     
     with st.form("fs"):
         res = []
@@ -118,9 +150,12 @@ elif st.session_state.phase == 'swiss':
             res.append({'h': t1, 'a': t2, 'g1': g1, 'g2': g2})
             
         if st.form_submit_button("Confirmar Rodada"):
+            # Processa Bye
             if curr.get('bye'):
                 for t in st.session_state.teams:
                     if t['id'] == curr['bye']['id']: t['wins'] += 1
+            
+            # Processa Jogos
             for r in res:
                 r['h']['goals_for'] += r['g1']; r['h']['goals_against'] += r['g2']
                 r['a']['goals_for'] += r['g2']; r['a']['goals_against'] += r['g1']
@@ -130,13 +165,17 @@ elif st.session_state.phase == 'swiss':
                 if r['g1'] > r['g2']: r['h']['wins'] += 1; r['a']['losses'] += 1
                 else: r['a']['wins'] += 1; r['h']['losses'] += 1
                 
+            # Atualiza Status
             for t in st.session_state.teams:
                 if t['wins'] >= 3: t['status'] = 'Classificado'
                 elif t['losses'] >= 3: t['status'] = 'Eliminado'
                 
             ativos = [t for t in st.session_state.teams if t['status'] == 'Ativo']
-            if not ativos: st.session_state.phase = 'end_swiss'
+            
+            if not ativos: 
+                st.session_state.phase = 'end_swiss'
             else:
+                # Gera próxima rodada
                 p = sorted(ativos, key=lambda x: (x['wins'], x['goal_diff'], x['goals_for'], -x['goals_against'], -x['losses']), reverse=True)
                 for t in st.session_state.teams: t['received_bye'] = False
                 b = p.pop() if len(p)%2 != 0 else None
@@ -144,12 +183,19 @@ elif st.session_state.phase == 'swiss':
                     for t in st.session_state.teams:
                         if t['id'] == b['id']: t['received_bye'] = True
                 st.session_state.rounds.append({'matches': [{'home': p[i]['id'], 'away': p[i+1]['id']} for i in range(0, len(p), 2)], 'bye': b})
+            
+            save_to_sheets() # Salva após confirmar
             st.rerun()
 
+# 3. FIM DO SUÍÇO
 elif st.session_state.phase == 'end_swiss':
     st.title("🏁 Fase Suíça Encerrada")
-    if st.button("🚀 Iniciar Mata-Mata"): build_playoffs(); st.rerun()
+    if st.button("🚀 Iniciar Mata-Mata"): 
+        build_playoffs()
+        save_to_sheets() # Salva ao mudar de fase
+        st.rerun()
 
+# 4. MATA-MATA
 elif st.session_state.phase == 'playoff':
     st.title("🔥 Eliminatórias")
     venc, derr, ready = [], [], True
@@ -177,8 +223,10 @@ elif st.session_state.phase == 'playoff':
         if ready:
             for item in (venc + derr):
                 t_obj = next(t for t in st.session_state.teams if t['id'] == item['t']['id'])
+                # Soma gols do mata-mata no ranking geral
                 t_obj['goals_for'] += item['g']; t_obj['goals_against'] += item['gc']
                 t_obj['goal_diff'] = t_obj['goals_for'] - t_obj['goals_against']
+                # Adiciona derrota se perdeu no mata-mata
                 if any(d['t']['id'] == t_obj['id'] for d in derr): t_obj['losses'] += 1
 
             final_match = next((v for v in venc if v['lbl'] == "Grande Final"), None)
@@ -200,10 +248,15 @@ elif st.session_state.phase == 'playoff':
                 else:
                     proximos = sorted(proximos, key=lambda x: (x['wins'], x['goal_diff'], x['goals_for'], -x['goals_against'], -x['losses']), reverse=True)
                     st.session_state.playoffs = [{'label': "Próxima Fase", 'matches': [{'home': proximos[i], 'away': proximos[-(i+1)]} for i in range(len(proximos)//2)]}]
+            
+            save_to_sheets() # Salva após jogos do mata-mata
             st.rerun()
 
+# 5. PÓDIO E FINAL
 elif st.session_state.phase == 'champion':
     st.balloons()
+    save_to_sheets() # Salva resultado final
+    
     st.markdown("<h1 style='text-align: center;'>🏆 PÓDIO FINAL 🏆</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     if st.session_state.second_place: c1.info(f"🥈 **2º LUGAR**\n\n{st.session_state.second_place['name']}")
@@ -211,7 +264,7 @@ elif st.session_state.phase == 'champion':
     if st.session_state.third_place: c3.warning(f"🥉 **3º LUGAR**\n\n{st.session_state.third_place['name']}")
     
     st.divider()
-    st.subheader("📊 Classificação Geral Final")
+    st.subheader("📊 Classificação Geral Final (Salva no Sheets)")
     df_final = pd.DataFrame(st.session_state.teams).sort_values(
         by=['wins', 'goal_diff', 'goals_for', 'goals_against', 'losses'], 
         ascending=[False, False, False, True, True]
