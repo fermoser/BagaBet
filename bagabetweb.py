@@ -14,7 +14,6 @@ for key, value in keys.items():
 
 # --- FUNÇÕES ---
 def get_rankings():
-    # Lógica Completa: Vitórias > Saldo > Gols Pró > Menos Gols Contra > Menos Derrotas
     return sorted(st.session_state.teams, 
                   key=lambda x: (x['wins'], x['goal_diff'], x['goals_for'], -x['goals_against'], -x['losses']), 
                   reverse=True)
@@ -49,19 +48,19 @@ def build_playoffs():
     st.session_state.playoffs = [{'label': "Mata-Mata", 'matches': matches}]
     st.session_state.phase = 'playoff'
 
-# --- SIDEBAR ---
+# --- SIDEBAR AJUSTADA ---
 with st.sidebar:
     st.title("📊 Ranking")
     if st.session_state.teams:
-        # Ordenação para exibição lateral
         df = pd.DataFrame(st.session_state.teams).sort_values(
             by=['wins', 'goal_diff', 'goals_for', 'goals_against', 'losses'], 
             ascending=[False, False, False, True, True]
         )
-        # RECOLOCANDO A COLUNA DE DERROTAS (losses)
+        # Selecionando colunas na ordem correta
         df_view = df[['name', 'wins', 'losses', 'goal_diff', 'goals_for', 'goals_against', 'received_bye', 'status']].copy()
-        df_view.columns = ['Time', 'V', 'D', 'SG', 'GP', 'GC', 'Bye', 'Status']
-        df_view['Bye'] = df_view['Bye'].apply(lambda x: "⭐" if x else "")
+        # Cabeçalhos ultra compactos para caber na lateral
+        df_view.columns = ['Time', 'V', 'D', 'SG', 'GP', 'GC', '⭐', 'Status']
+        df_view['⭐'] = df_view['⭐'].apply(lambda x: "⭐" if x else "")
 
         def color_status(val):
             if val == 'Classificado': color = '#d4edda'
@@ -70,7 +69,13 @@ with st.sidebar:
             return f'background-color: {color}; color: black; font-weight: bold'
 
         calc_height = (len(df_view) + 1) * 35 + 3
-        st.dataframe(df_view.style.applymap(color_status, subset=['Status']), hide_index=True, height=calc_height)
+        # use_container_width garante que ele use o máximo de largura da sidebar
+        st.dataframe(
+            df_view.style.applymap(color_status, subset=['Status']), 
+            hide_index=True, 
+            height=calc_height,
+            use_container_width=True 
+        )
     
     if st.button("🗑️ Reset Total"):
         for k in keys: st.session_state[k] = keys[k]
@@ -174,8 +179,7 @@ elif st.session_state.phase == 'playoff':
                 t_obj = next(t for t in st.session_state.teams if t['id'] == item['t']['id'])
                 t_obj['goals_for'] += item['g']; t_obj['goals_against'] += item['gc']
                 t_obj['goal_diff'] = t_obj['goals_for'] - t_obj['goals_against']
-                # Gols no mata-mata também podem causar uma derrota no ranking geral
-                if item in derr: t_obj['losses'] += 1
+                if any(d['t']['id'] == t_obj['id'] for d in derr): t_obj['losses'] += 1
 
             final_match = next((v for v in venc if v['lbl'] == "Grande Final"), None)
             if final_match:
