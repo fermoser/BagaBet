@@ -21,9 +21,9 @@ keys = {'tournament_name': "", 'teams': [], 'phase': 'setup', 'rounds': [], 'pla
 for key, value in keys.items():
     if key not in st.session_state: st.session_state[key] = value
 
-# --- FUNÇÃO DE SALVAMENTO (HISTÓRICO SEGURO) ---
+# --- FUNÇÃO DE SALVAMENTO (HISTÓRICO ACUMULATIVO) ---
 def save_to_sheets():
-    # Só salva se não estiver no setup inicial
+    # Trava: Não salva se estiver na tela inicial ou sem times
     if not SHEET_ENABLED or not st.session_state.teams or st.session_state.phase == 'setup': 
         return
     
@@ -31,32 +31,40 @@ def save_to_sheets():
         df_to_save = pd.DataFrame(st.session_state.teams)
         df_to_save['tournament_name'] = st.session_state.tournament_name
         
+        # Padroniza o BYE para SIM/NÃO
         if 'received_bye' in df_to_save.columns:
             df_to_save['received_bye'] = df_to_save['received_bye'].apply(
                 lambda x: "SIM" if str(x).upper() in ["TRUE", "SIM", "1"] else "NÃO"
             )
 
+        # Converte tudo para string para compatibilidade total
         df_to_save = df_to_save.astype(str)
 
         try:
+            # Lê o histórico atual do Sheets
             existing_data = conn.read(worksheet="suico")
+            
             if existing_data is not None and not existing_data.empty:
-                # Mantém outros torneios e substitui apenas o atual (para atualizar rodadas)
+                # IMPORTANTE: Mantém todos os torneios antigos.
+                # Apenas filtra o torneio ATUAL para atualizá-lo sem duplicar linhas.
                 other_tournaments = existing_data[existing_data['tournament_name'] != st.session_state.tournament_name]
                 df_final = pd.concat([other_tournaments, df_to_save], ignore_index=True)
             else:
                 df_final = df_to_save
         except:
+            # Se a planilha estiver vazia, apenas usa os dados atuais
             df_final = df_to_save
 
+        # Atualiza o Google Sheets com a lista completa (Antigos + Atual Atualizado)
         conn.update(worksheet="suico", data=df_final)
-        st.toast(f"☁️ Histórico Atualizado: {st.session_state.tournament_name}")
+        st.toast(f"☁️ Histórico Geral Sincronizado!")
         
     except Exception as e:
-        st.error(f"⚠️ Erro ao salvar: {e}")
+        st.error(f"⚠️ Erro ao salvar histórico: {e}")
 
 # --- FUNÇÕES DE LÓGICA ---
 def get_rankings():
+    # Garante ordenação correta convertendo strings para inteiros temporariamente
     return sorted(st.session_state.teams, 
                   key=lambda x: (int(x['wins']), int(x['goal_diff']), int(x['goals_for']), -int(x['goals_against']), -int(x['losses'])), 
                   reverse=True)
@@ -105,6 +113,8 @@ with st.sidebar:
         
         df_view = df_rank[['name', 'wins', 'losses', 'goal_diff', 'goals_for', 'goals_against', 'received_bye', 'status']].copy()
         df_view.columns = ['Time', 'V', 'D', 'SG', 'GP', 'GC', '⭐', 'Status']
+        
+        # Lógica visual para a estrela do BYE
         df_view['⭐'] = df_view['⭐'].apply(lambda x: "⭐" if str(x).upper() in ["TRUE", "SIM", "1"] else "")
 
         def color_status(val):
@@ -115,7 +125,7 @@ with st.sidebar:
         st.dataframe(df_view.style.applymap(color_status, subset=['Status']), 
                      hide_index=True, use_container_width=True)
     
-    if st.button("🗑️ Novo Torneio / Reset"):
+    if st.button("🗑️ Reset / Novo Torneio"):
         for k in keys: st.session_state[k] = keys[k]
         st.rerun()
 
@@ -128,8 +138,8 @@ if st.session_state.phase == 'setup':
     
     with st.form("f1"):
         names = [st.text_input(f"Time {i+1}", f"Equipe {i+1}", key=f"i{i}") for i in range(num)]
-        if st.form_submit_button("Criar Torneio"):
-            if not t_name: st.warning("Dê um nome ao torneio!")
+        if st.form_submit_button("Gerar Torneio"):
+            if not t_name: st.error("Por favor, dê um nome ao torneio!")
             else:
                 st.session_state.tournament_name = t_name
                 st.session_state.teams = [{
@@ -137,18 +147,22 @@ if st.session_state.phase == 'setup':
                     'goals_for': 0, 'goals_against': 0, 'received_bye': False, 'status': 'Ativo'
                 } for i, n in enumerate(names)]
                 st.session_state.phase = 'swiss'
+                
+                # Sorteio inicial
                 p = st.session_state.teams.copy(); random.shuffle(p)
                 b = p.pop() if len(p)%2 != 0 else None
                 if b:
                     for t in st.session_state.teams:
                         if t['id'] == b['id']: t['received_bye'] = True
+                
                 st.session_state.rounds = [{'matches': [{'home': p[i]['id'], 'away': p[i+1]['id']} for i in range(0, len(p), 2)], 'bye': b}]
-                save_to_sheets(); st.rerun()
+                save_to_sheets()
+                st.rerun()
 
 elif st.session_state.phase == 'swiss':
     st.title(f"⚽ {st.session_state.tournament_name} - Rodada {len(st.session_state.rounds)}")
     curr = st.session_state.rounds[-1]
-    if curr.get('bye'): st.info(f"⭐ Folga: {curr['bye']['name']}")
+    if curr.get('bye'): st.info(f"⭐ Folga (BYE): {curr['bye']['name']}")
     
     with st.form("fs"):
         res = []
@@ -160,10 +174,11 @@ elif st.session_state.phase == 'swiss':
             g2 = g2c.number_input(t2['name'], 0, 100, key=f"s2{i}")
             res.append({'h': t1, 'a': t2, 'g1': g1, 'g2': g2})
             
-        if st.form_submit_button("Confirmar Rodada"):
+        if st.form_submit_button("Confirmar Resultados"):
             if curr.get('bye'):
                 for t in st.session_state.teams:
                     if t['id'] == curr['bye']['id']: t['wins'] = int(t['wins']) + 1
+            
             for r in res:
                 r['h']['goals_for'] = int(r['h']['goals_for']) + r['g1']
                 r['h']['goals_against'] = int(r['h']['goals_against']) + r['g2']
@@ -183,7 +198,8 @@ elif st.session_state.phase == 'swiss':
                 elif int(t['losses']) >= 3: t['status'] = 'Eliminado'
                 
             ativos = [t for t in st.session_state.teams if t['status'] == 'Ativo']
-            if not ativos: st.session_state.phase = 'end_swiss'
+            if not ativos: 
+                st.session_state.phase = 'end_swiss'
             else:
                 p = get_rankings()
                 p = [t for t in p if t['status'] == 'Ativo']
@@ -193,11 +209,13 @@ elif st.session_state.phase == 'swiss':
                     for t in st.session_state.teams:
                         if t['id'] == b['id']: t['received_bye'] = True
                 st.session_state.rounds.append({'matches': [{'home': p[i]['id'], 'away': p[i+1]['id']} for i in range(0, len(p), 2)], 'bye': b})
+            
             save_to_sheets(); st.rerun()
 
 elif st.session_state.phase == 'end_swiss':
     st.title("🏁 Suíço Encerrado")
-    if st.button("🚀 Iniciar Mata-Mata"): build_playoffs(); save_to_sheets(); st.rerun()
+    if st.button("🚀 Iniciar Mata-Mata"): 
+        build_playoffs(); save_to_sheets(); st.rerun()
 
 elif st.session_state.phase == 'playoff':
     st.title(f"🔥 Eliminatórias - {st.session_state.tournament_name}")
@@ -222,7 +240,7 @@ elif st.session_state.phase == 'playoff':
                 venc.append({'t': m['away'], 'lbl': p_round['label'], 'g': g2, 'gc': g1})
                 derr.append({'t': m['home'], 'lbl': p_round['label'], 'g': g1, 'gc': g2})
 
-    if st.button("Avançar"):
+    if st.button("Avançar para Final/Próxima Fase"):
         if ready:
             for item in (venc + derr):
                 t_obj = next(t for t in st.session_state.teams if t['id'] == item['t']['id'])
