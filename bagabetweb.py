@@ -14,7 +14,6 @@ for key, value in keys.items():
 
 # --- FUNÇÕES ---
 def get_rankings():
-    # Lógica de desempate: Vitórias > Saldo > Gols Pró > Menos Gols Contra
     return sorted(st.session_state.teams, 
                   key=lambda x: (x['wins'], x['goal_diff'], x['goals_for'], -x['goals_against']), 
                   reverse=True)
@@ -53,7 +52,6 @@ def build_playoffs():
 with st.sidebar:
     st.title("📊 Ranking")
     if st.session_state.teams:
-        # Ordenação para exibição
         df = pd.DataFrame(st.session_state.teams).sort_values(
             by=['wins', 'goal_diff', 'goals_for', 'goals_against'], 
             ascending=[False, False, False, True]
@@ -68,8 +66,9 @@ with st.sidebar:
             else: color = '#cce5ff'
             return f'background-color: {color}; color: black; font-weight: bold'
 
-        # height=None faz a tabela crescer conforme o número de linhas
-        st.dataframe(df_view.style.applymap(color_status, subset=['Status']), hide_index=True, height=None)
+        # CORREÇÃO DO ERRO: Calculando altura dinâmica para evitar o scroll e o erro de height=None
+        calc_height = (len(df_view) + 1) * 35 + 3
+        st.dataframe(df_view.style.applymap(color_status, subset=['Status']), hide_index=True, height=calc_height)
     
     if st.button("🗑️ Reset Total"):
         for k in keys: st.session_state[k] = keys[k]
@@ -116,7 +115,6 @@ elif st.session_state.phase == 'swiss':
                 for t in st.session_state.teams:
                     if t['id'] == curr['bye']['id']: t['wins'] += 1
             for r in res:
-                # Atualiza Gols Pró, Contra e Saldo
                 r['h']['goals_for'] += r['g1']; r['h']['goals_against'] += r['g2']
                 r['a']['goals_for'] += r['g2']; r['a']['goals_against'] += r['g1']
                 r['h']['goal_diff'] = r['h']['goals_for'] - r['h']['goals_against']
@@ -143,7 +141,6 @@ elif st.session_state.phase == 'swiss':
 
 elif st.session_state.phase == 'end_swiss':
     st.title("🏁 Fase Suíça Encerrada")
-    st.info("Os classificados foram definidos. Prepare-se para o Mata-Mata!")
     if st.button("🚀 Iniciar Mata-Mata"): build_playoffs(); st.rerun()
 
 elif st.session_state.phase == 'playoff':
@@ -171,7 +168,6 @@ elif st.session_state.phase == 'playoff':
 
     if st.button("Confirmar e Avançar"):
         if ready:
-            # Atualiza gols do mata-mata para o ranking final
             for item in (venc + derr):
                 t_obj = next(t for t in st.session_state.teams if t['id'] == item['t']['id'])
                 t_obj['goals_for'] += item['g']; t_obj['goals_against'] += item['gc']
@@ -200,7 +196,7 @@ elif st.session_state.phase == 'playoff':
 
 elif st.session_state.phase == 'champion':
     st.balloons()
-    st.markdown("<h1 style='text-align: center; color: #FFD700;'>🏆 PÓDIO FINAL 🏆</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>🏆 PÓDIO FINAL 🏆</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     if st.session_state.second_place: c1.info(f"🥈 **2º LUGAR**\n\n{st.session_state.second_place['name']}")
     if st.session_state.champion: c2.success(f"🥇 **CAMPEÃO**\n\n# {st.session_state.champion['name']}")
@@ -214,7 +210,6 @@ elif st.session_state.phase == 'champion':
     )
     df_final_view = df_final[['name', 'wins', 'goal_diff', 'goals_for', 'goals_against']].copy()
     df_final_view.columns = ['Equipe', 'Vitórias', 'Saldo de Gols', 'Gols Pró', 'Gols Contra']
-    # Tabela final sem scroll
     st.table(df_final_view)
 
     if st.button("🔄 Iniciar Novo Torneio"):
