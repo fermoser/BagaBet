@@ -21,24 +21,25 @@ keys = {'tournament_name': "", 'teams': [], 'phase': 'setup', 'rounds': [], 'pla
 for key, value in keys.items():
     if key not in st.session_state: st.session_state[key] = value
 
-# --- FUNÇÃO DE SALVAMENTO (MODO HISTÓRICO) ---
+# --- FUNÇÃO DE SALVAMENTO (REVISADA) ---
 def save_to_sheets():
     if not SHEET_ENABLED or not st.session_state.teams: return
     
     try:
         df_new = pd.DataFrame(st.session_state.teams)
-        # Adiciona o nome do torneio para identificação futura
         df_new['tournament_name'] = st.session_state.tournament_name
         
-        # Converte tipos complexos
+        # Padronização para o Sheets: BYE vira SIM/NÃO para não confundir com 0/False
+        if 'received_bye' in df_new.columns:
+            df_new['received_bye'] = df_new['received_bye'].apply(lambda x: "SIM" if x in [True, "True", "SIM"] else "NÃO")
+
+        # Converte outros tipos complexos para string
         for col in df_new.columns:
-            if df_new[col].dtype == 'bool' or isinstance(df_new[col].iloc[0], (list, dict)):
+            if df_new[col].dtype == 'object' or isinstance(df_new[col].iloc[0], (list, dict)):
                 df_new[col] = df_new[col].astype(str)
 
-        # Lógica para não apagar: Lemos o que já existe e concatenamos
         try:
             existing_data = conn.read(worksheet="suico")
-            # Removemos os dados antigos deste torneio específico para atualizar com os novos
             if not existing_data.empty and 'tournament_name' in existing_data.columns:
                 existing_data = existing_data[existing_data['tournament_name'] != st.session_state.tournament_name]
             df_final = pd.concat([existing_data, df_new], ignore_index=True)
@@ -46,7 +47,7 @@ def save_to_sheets():
             df_final = df_new
 
         conn.update(worksheet="suico", data=df_final)
-        st.toast(f"✅ Torneio '{st.session_state.tournament_name}' sincronizado!", icon="☁️")
+        st.toast(f"✅ Sincronizado: {st.session_state.tournament_name}", icon="☁️")
         
     except Exception as e:
         st.error(f"⚠️ ERRO AO SALVAR: {e}")
@@ -96,8 +97,12 @@ with st.sidebar:
             by=['wins', 'goal_diff', 'goals_for', 'goals_against', 'losses'], 
             ascending=[False, False, False, True, True]
         )
-        df_view = df[['name', 'wins', 'losses', 'goal_diff', 'goals_for', 'goals_against', 'status']].copy()
-        df_view.columns = ['Time', 'V', 'D', 'SG', 'GP', 'GC', 'Status']
+        # RECOLOCADA A COLUNA ⭐ (BYE)
+        df_view = df[['name', 'wins', 'losses', 'goal_diff', 'goals_for', 'goals_against', 'received_bye', 'status']].copy()
+        df_view.columns = ['Time', 'V', 'D', 'SG', 'GP', 'GC', '⭐', 'Status']
+        
+        # Lógica visual para o ícone de estrela
+        df_view['⭐'] = df_view['⭐'].apply(lambda x: "⭐" if x in [True, "True", "SIM"] else "")
 
         def color_status(val):
             if val == 'Classificado': color = '#d4edda'
@@ -115,16 +120,15 @@ with st.sidebar:
 # --- TELAS ---
 if st.session_state.phase == 'setup':
     st.title("🏆 Novo Torneio Suíço")
-    
     col_n, col_q = st.columns([2, 1])
-    t_name = col_n.text_input("Nome do Torneio (Ex: Baga Open 2026)", placeholder="Digite aqui...")
+    t_name = col_n.text_input("Nome do Torneio", placeholder="Ex: Baga Open 2026")
     num = col_q.number_input("Qtd de Equipes", 2, 64, 8)
     
     with st.form("f1"):
         names = [st.text_input(f"Time {i+1}", f"Equipe {i+1}", key=f"i{i}") for i in range(num)]
         if st.form_submit_button("Gerar Torneio"):
             if not t_name:
-                st.error("Por favor, digite um nome para o torneio!")
+                st.error("Digite o nome do torneio!")
             else:
                 st.session_state.tournament_name = t_name
                 st.session_state.teams = [{
@@ -157,10 +161,14 @@ elif st.session_state.phase == 'swiss':
             g2 = g2c.number_input(t2['name'], 0, 100, key=f"s2{i}")
             res.append({'h': t1, 'a': t2, 'g1': g1, 'g2': g2})
             
-        if st.form_submit_button("Confirmar Resultados"):
+        if st.form_submit_button("Confirmar Rodada"):
             if curr.get('bye'):
                 for t in st.session_state.teams:
-                    if t['id'] == curr['bye']['id']: t['wins'] += 1
+                    if t['id'] == curr['bye']['id']: 
+                        t['wins'] += 1
+                        # O Bye agora conta como uma vitória, então ele pode classificar aqui
+                        if t['wins'] >= 3: t['status'] = 'Classificado'
+            
             for r in res:
                 r['h']['goals_for'] += r['g1']; r['h']['goals_against'] += r['g2']
                 r['a']['goals_for'] += r['g2']; r['a']['goals_against'] += r['g1']
@@ -186,6 +194,7 @@ elif st.session_state.phase == 'swiss':
             save_to_sheets()
             st.rerun()
 
+# Restante do código (Playoff e Champion) permanece igual à lógica de salvamento histórico
 elif st.session_state.phase == 'end_swiss':
     st.title("🏁 Suíço Encerrado")
     if st.button("🚀 Iniciar Mata-Mata"): build_playoffs(); save_to_sheets(); st.rerun()
@@ -220,7 +229,7 @@ elif st.session_state.phase == 'playoff':
                 t_obj['goals_for'] += item['g']; t_obj['goals_against'] += item['gc']
                 t_obj['goal_diff'] = t_obj['goals_for'] - t_obj['goals_against']
                 if any(d['t']['id'] == t_obj['id'] for d in derr): t_obj['losses'] += 1
-
+            
             final_match = next((v for v in venc if v['lbl'] == "Grande Final"), None)
             if final_match:
                 st.session_state.champion = final_match['t']
@@ -243,8 +252,7 @@ elif st.session_state.phase == 'playoff':
             st.rerun()
 
 elif st.session_state.phase == 'champion':
-    st.balloons()
-    save_to_sheets()
+    st.balloons(); save_to_sheets()
     st.markdown(f"<h1 style='text-align: center;'>🏆 {st.session_state.tournament_name} 🏆</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     if st.session_state.second_place: c1.info(f"🥈 **2º LUGAR**\n\n{st.session_state.second_place['name']}")
