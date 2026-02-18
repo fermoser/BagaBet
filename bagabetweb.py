@@ -7,7 +7,7 @@ from streamlit_gsheets import GSheetsConnection
 st.set_page_config(page_title="BAGA GESTOR PRO", layout="wide", page_icon="🏆")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- ESTADO ---
+# --- INICIALIZAÇÃO ---
 if 'teams' not in st.session_state: st.session_state.teams = []
 if 'phase' not in st.session_state: st.session_state.phase = 'setup'
 if 'rounds' not in st.session_state: st.session_state.rounds = []
@@ -15,80 +15,59 @@ if 'playoffs' not in st.session_state: st.session_state.playoffs = []
 if 'waiting_next' not in st.session_state: st.session_state.waiting_next = []
 if 'champion' not in st.session_state: st.session_state.champion = None
 
-# --- FUNÇÕES ---
+# --- FUNÇÕES CORE ---
+
 def get_rankings():
     return sorted(st.session_state.teams, key=lambda x: (x['wins'], -x['losses'], x['goal_diff']), reverse=True)
 
 def build_playoffs():
+    """Lógica de Chaveamento para não 'sumir' ninguém"""
     qualified = [t for t in get_rankings() if t['status'] == 'Classificado']
     n = len(qualified)
+    if n == 0: return
     
-    if n == 0:
-        st.error("Ninguém classificado!")
-        return
-
-    matches = []
-    # Limpa e reinicia a espera
     st.session_state.waiting_next = []
-
-    # LÓGICA CORRIGIDA: Se o número for 2, 4, 8, 16... (Potência de 2)
-    # Faz o chaveamento direto. 
-    # Se não for (ex: 3, 5, 6, 7, 9...), os melhores da tabela ganham BYE (esperam)
+    matches = []
     
-    # Lista de potências de 2 para conferência
-    potencias_de_2 = [2, 4, 8, 16, 32]
-    
-    if n not in potencias_de_2:
-        # Quantos jogos PODEMOS fazer para chegar mais perto de uma potência de 2?
-        # Ex: Se temos 6, fazemos 2 jogos (sobram 2 + 2 vencedores = 4 para a próxima)
-        if n == 6:
-            st.session_state.waiting_next = qualified[:2] # 1º e 2º esperam
-            to_play = qualified[2:] # 3º, 4º, 5º e 6º jogam
-        elif n == 3:
-            st.session_state.waiting_next = [qualified[0]] # 1º espera
-            to_play = qualified[1:] # 2º e 3º jogam
-        elif n == 5:
-            st.session_state.waiting_next = [qualified[0], qualified[1], qualified[2]] # 1, 2 e 3 esperam
-            to_play = qualified[3:] # 4º e 5º jogam
-        elif n == 7:
-            st.session_state.waiting_next = [qualified[0]] # 1º espera
-            to_play = qualified[1:] # 2, 3, 4, 5, 6, 7 jogam
-        else:
-            # Fallback genérico para outros números ímpares
-            st.session_state.waiting_next = [qualified[0]]
-            to_play = qualified[1:]
-        
-        matches = [{'home': to_play[i], 'away': to_play[-(i+1)], 'label': f'Rodada Preliminar {i+1}'} for i in range(len(to_play)//2)]
-        label = "Rodada de Acesso (Melhores aguardam)"
-    
+    # Se não for potência de 2 (2, 4, 8), os melhores esperam
+    if n == 6:
+        st.session_state.waiting_next = qualified[:2]
+        to_play = qualified[2:]
+    elif n == 3:
+        st.session_state.waiting_next = [qualified[0]]
+        to_play = qualified[1:]
+    elif n == 5:
+        st.session_state.waiting_next = qualified[:3]
+        to_play = qualified[3:]
+    elif n == 7:
+        st.session_state.waiting_next = [qualified[0]]
+        to_play = qualified[1:]
     else:
-        # Chaveamento Perfeito (2, 4, 8)
-        if n == 8:
-            matches = [{'home': qualified[i], 'away': qualified[7-i], 'label': f'Quartas {i+1}'} for i in range(4)]
-            label = "Quartas de Final"
-        elif n == 4:
-            matches = [{'home': qualified[i], 'away': qualified[3-i], 'label': f'Semi {i+1}'} for i in range(2)]
-            label = "Semifinais"
-        else:
-            matches = [{'home': qualified[0], 'away': qualified[1], 'label': 'Grande Final'}]
-            label = "Grande Final"
-
+        # 2, 4 ou 8 times (perfeito)
+        to_play = qualified
+        
+    matches = [{'home': to_play[i], 'away': to_play[-(i+1)], 'label': f'Jogo {i+1}'} for i in range(len(to_play)//2)]
+    label = "Mata-Mata (Fase Inicial)" if st.session_state.waiting_next else "Chave Principal"
+    
     st.session_state.playoffs.append({'label': label, 'matches': matches})
     st.session_state.phase = 'playoff'
-# --- SIDEBAR ---
+
+# --- BARRA LATERAL ---
 with st.sidebar:
-    st.title("📊 Ranking")
+    st.title("📊 Ranking Geral")
     if st.session_state.teams:
         df_rank = pd.DataFrame(get_rankings())
         df_view = df_rank[['name', 'wins', 'losses', 'goal_diff', 'received_bye', 'status']].copy()
         df_view.columns = ['Time', 'V', 'D', 'SG', 'Bye', 'Status']
-        df_view['Bye'] = df_view['Bye'].apply(lambda x: "⭐" if x else "")
         
+        # O ÍCONE (Garante que o True vira ⭐)
+        df_view['Bye'] = df_view['Bye'].map({True: "⭐", False: ""})
+
         def style_status(val):
             if val == 'Classificado': return 'background-color: #d4edda; color: black; font-weight: bold'
             if val == 'Eliminado': return 'background-color: #f8d7da; color: black; font-weight: bold'
-            return 'background-color: #cce5ff; color: black; font-weight: bold'
-            
+            return 'background-color: #cce5ff; color: black'
+
         st.dataframe(df_view.style.applymap(style_status, subset=['Status']), hide_index=True)
     
     if st.button("Reset Total"):
@@ -96,12 +75,13 @@ with st.sidebar:
         st.rerun()
 
 # --- TELAS ---
+
 if st.session_state.phase == 'setup':
     st.title("🏆 Configuração")
     num = st.number_input("Equipes", 2, 32, 8)
     with st.form("st"):
-        names = [st.text_input(f"Time {i+1}", f"Equipe {i+1}", key=f"t{i}") for i in range(num)]
-        if st.form_submit_button("Gerar Torneio"):
+        names = [st.text_input(f"Time {i+1}", f"Equipe {i+1}", key=f"n{i}") for i in range(num)]
+        if st.form_submit_button("Gerar"):
             st.session_state.teams = [{'id': i, 'name': n, 'wins': 0, 'losses': 0, 'goals_for': 0, 'goal_diff': 0, 'received_bye': False, 'history': [], 'status': 'Ativo'} for i, n in enumerate(names)]
             st.session_state.phase = 'swiss'
             pool = st.session_state.teams.copy(); random.shuffle(pool)
@@ -113,31 +93,41 @@ if st.session_state.phase == 'setup':
 elif st.session_state.phase == 'swiss':
     st.title(f"⚽ Rodada {len(st.session_state.rounds)} (Suíço)")
     curr = st.session_state.rounds[-1]
-    if curr.get('bye'): st.warning(f"⭐ **BYE:** {curr['bye']['name']} (+1 Vitória)")
     
-    with st.form("sw"):
+    if curr.get('bye'):
+        st.warning(f"⭐ **FOLGA:** {curr['bye']['name']} (+1 Vitória)")
+
+    with st.form("swiss_res"):
         res = []
         for i, m in enumerate(curr['matches']):
             t1 = next(t for t in st.session_state.teams if t['id'] == m['home'])
             t2 = next(t for t in st.session_state.teams if t['id'] == m['away'])
             c1, g1c, g2c, c2 = st.columns([2,1,1,2])
-            g1 = g1c.number_input(t1['name'], 0, 50, key=f"g1_{i}")
-            g2 = g2c.number_input(t2['name'], 0, 50, key=f"g2_{i}")
+            g1 = g1c.number_input(t1['name'], 0, 50, key=f"g1{i}")
+            g2 = g2c.number_input(t2['name'], 0, 50, key=f"g2{i}")
             res.append({'h_id': t1['id'], 'a_id': t2['id'], 'g1': g1, 'g2': g2})
         
         if st.form_submit_button("Confirmar Rodada"):
+            # PROCESSA BYE NO SUÍÇO
             if curr.get('bye'):
                 for t in st.session_state.teams:
-                    if t['id'] == curr['bye']['id']: t['wins'] += 1; t['received_bye'] = True
+                    if t['id'] == curr['bye']['id']:
+                        t['wins'] += 1
+                        t['received_bye'] = True
+            
+            # PROCESSA JOGOS
             for r in res:
                 t1 = next(t for t in st.session_state.teams if t['id'] == r['h_id'])
                 t2 = next(t for t in st.session_state.teams if t['id'] == r['a_id'])
                 t1['goal_diff'] += (r['g1']-r['g2']); t2['goal_diff'] += (r['g2']-r['g1'])
                 if r['g1'] > r['g2']: t1['wins'] += 1; t2['losses'] += 1
                 else: t2['wins'] += 1; t1['losses'] += 1
+            
+            # ATUALIZA STATUS
             for t in st.session_state.teams:
                 if t['wins'] >= 3: t['status'] = 'Classificado'
                 elif t['losses'] >= 3: t['status'] = 'Eliminado'
+            
             ativos = [t for t in st.session_state.teams if t['status'] == 'Ativo']
             if not ativos: st.session_state.phase = 'end_swiss'
             else:
@@ -158,47 +148,45 @@ elif st.session_state.phase == 'playoff':
     st.title(f"🔥 {curr_p['label']}")
     
     if st.session_state.waiting_next:
-        st.info("🛡️ **Aguardando:** " + ", ".join([t['name'] for t in st.session_state.waiting_next]))
+        st.info("⏳ **Esperando na próxima fase:** " + ", ".join([t['name'] for t in st.session_state.waiting_next]))
 
-    # Usamos container normal em vez de form para os pênaltis serem dinâmicos
     vencedores = []
-    ready_to_submit = True
+    ready = True
     
     for i, m in enumerate(curr_p['matches']):
         st.subheader(f"{m['label']}")
         c1, g1c, g2c, c2 = st.columns([2,1,1,2])
-        g1 = g1c.number_input(f"{m['home']['name']}", 0, 50, key=f"pg1_{i}")
-        g2 = g2c.number_input(f"{m['away']['name']}", 0, 50, key=f"pg2_{i}")
+        g1 = g1c.number_input(f"{m['home']['name']}", 0, 50, key=f"pg1{i}")
+        g2 = g2c.number_input(f"{m['away']['name']}", 0, 50, key=f"pg2{i}")
         
         p1, p2 = 0, 0
         if g1 == g2:
-            st.caption("⚠️ Jogo empatado! Informe o resultado dos Pênaltis:")
+            st.caption("Pênaltis Necessários:")
             pc1, pc2 = st.columns(2)
-            p1 = pc1.number_input(f"Pên. {m['home']['name']}", 0, 50, key=f"pp1_{i}")
-            p2 = pc2.number_input(f"Pên. {m['away']['name']}", 0, 50, key=f"pp2_{i}")
-            if p1 == p2:
-                st.error("Os pênaltis não podem terminar empatados!")
-                ready_to_submit = False
+            p1 = pc1.number_input(f"Pên. {m['home']['name']}", 0, 50, key=f"pp1{i}")
+            p2 = pc2.number_input(f"Pên. {m['away']['name']}", 0, 50, key=f"pp2{i}")
+            if p1 == p2: ready = False
         
         vencedores.append(m['home'] if (g1 > g2 or (g1 == g2 and p1 > p2)) else m['away'])
-        st.divider()
     
-    if st.button("Confirmar e Avançar de Fase") and ready_to_submit:
-        proximos = st.session_state.waiting_next + vencedores
-        st.session_state.waiting_next = []
-        
-        if len(proximos) == 1:
-            st.session_state.champion = proximos[0]
-            st.session_state.phase = 'champion'
+    if st.button("Avançar"):
+        if ready:
+            proximos = st.session_state.waiting_next + vencedores
+            st.session_state.waiting_next = []
+            
+            if len(proximos) == 1:
+                st.session_state.champion = proximos[0]
+                st.session_state.phase = 'champion'
+            else:
+                proximos = sorted(proximos, key=lambda x: (x['wins'], x['goal_diff']), reverse=True)
+                lbl = "Final" if len(proximos) == 2 else "Semifinais"
+                prox_m = [{'home': proximos[i], 'away': proximos[-(i+1)], 'label': f'Jogo {i+1}'} for i in range(len(proximos)//2)]
+                st.session_state.playoffs.append({'label': lbl, 'matches': prox_m})
+            st.rerun()
         else:
-            proximos = sorted(proximos, key=lambda x: (x['wins'], x['goal_diff']), reverse=True)
-            lbl = "Final" if len(proximos) == 2 else "Semifinais"
-            prox_m = [{'home': proximos[i], 'away': proximos[-(i+1)], 'label': f'Jogo {i+1}'} for i in range(len(proximos)//2)]
-            st.session_state.playoffs.append({'label': lbl, 'matches': prox_m})
-        st.rerun()
+            st.error("Pênaltis não podem empatar!")
 
 elif st.session_state.phase == 'champion':
     st.balloons()
-    st.markdown(f"<h1 style='text-align: center; color: #FFD700;'>🏆 CAMPEÃO: {st.session_state.champion['name']}</h1>", unsafe_allow_html=True)
-    if st.button("Novo Torneio"): st.session_state.clear(); st.rerun()
-
+    st.markdown(f"<h1 style='text-align: center;'>🏆 CAMPEÃO: {st.session_state.champion['name']}</h1>", unsafe_allow_html=True)
+    if st.button("Reiniciar"): st.session_state.clear(); st.rerun()
