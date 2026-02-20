@@ -992,47 +992,64 @@ else:
                                 if is_admin:
                                     with st.expander("✎ Editar Jogo"):
                                         with st.form(f"f_{idx}"):
-                                            # Se for COPA e o modo for Ida e Volta, abre os 4 campos
-                                            if fmt == "COPA" and r['modo_copa'] == "Ida e Volta":
+                                            # Garante o modo de disputa correto lendo a variável mestre do torneio
+                                            is_ida_volta = (fmt == "COPA" and modo_atual == "Ida e Volta")
+                                            
+                                            if is_ida_volta:
                                                 c_ida, c_volta = st.columns(2)
                                                 ia = c_ida.number_input(f"Ida: {r['a']}", 0, 99, int(r['ida_a']), key=f"ia_{idx}")
                                                 ib = c_ida.number_input(f"Ida: {r['b']}", 0, 99, int(r['ida_b']), key=f"ib_{idx}")
                                                 va = c_volta.number_input(f"Volta: {r['a']}", 0, 99, int(r['volta_a']), key=f"va_{idx}")
                                                 vb = c_volta.number_input(f"Volta: {r['b']}", 0, 99, int(r['volta_b']), key=f"vb_{idx}")
                                                 res, sa, sb = [ia+va, ib+vb, ia, ib, va, vb], (ia+va), (ib+vb)
+                                                
+                                                # Trava para não avançar de fase antes da hora
+                                                st.markdown("---")
+                                                encerrar = st.checkbox("✅ Encerrar Confronto (Marque apenas após o jogo de Volta para avançar de fase)", value=is_done(r['finalizado']), key=f"chk_{idx}")
                                             else:
                                                 ca, cb = st.columns(2)
                                                 ga = ca.number_input(f"{r['a']}", 0, 99, int(r['gols_a']), key=f"ga_{idx}")
                                                 gb = cb.number_input(f"{r['b']}", 0, 99, int(r['gols_b']), key=f"gb_{idx}")
                                                 res, sa, sb = [ga, gb, ga, gb, 0, 0], ga, gb
+                                                encerrar = True # Jogo único/Liga sempre encerra ao salvar
                                             
                                             pa, pb = 0, 0
-                                            # Correção do Alinhamento dos Pênaltis
                                             if fmt == "COPA" and sa == sb and r['a'] != "BYE" and r['b'] != "BYE":
-                                                st.markdown("---")
-                                                st.caption("🏆 Decisão por Pênaltis")
+                                                if is_ida_volta:
+                                                    st.caption("🏆 Pênaltis (Preencha apenas no jogo de Volta se a soma empatar)")
+                                                else:
+                                                    st.caption("🏆 Decisão por Pênaltis")
+                                                
+                                                # Pênaltis agora alinhados perfeitamente abaixo em novas colunas
                                                 cp1, cp2 = st.columns(2)
                                                 pa = cp1.number_input(f"Pênaltis {r['a']}", 0, 99, int(r['pen_a']), key=f"pa_{idx}")
                                                 pb = cp2.number_input(f"Pênaltis {r['b']}", 0, 99, int(r['pen_b']), key=f"pb_{idx}")
                                             
                                             if st.form_submit_button("Salvar"):
-                                                df_db.loc[idx, ['gols_a','gols_b','ida_a','ida_b','volta_a','volta_b','pen_a','pen_b','finalizado']] = res + [pa, pb, "SIM"]
-                                                if fmt == "COPA":
-                                                    df_fase = df_db[(df_db['torneio_id'] == tid) & (df_db['fase'] == r['fase'])]
-                                                    if all(df_fase['finalizado'].apply(is_done)):
-                                                        v, p = [], []
-                                                        for _, rf in df_fase.iterrows():
-                                                            vw, pl = obter_vencedor_perdedor(rf)
-                                                            if vw: v.append(vw); p.append(pl)
-                                                        novos = []
-                                                        if r['fase'] == "Semifinal" and len(v)>=2:
-                                                            # Alterado para herdar o r['modo_copa'] em vez de forçar 'Só Ida'
-                                                            novos.append({'torneio_id':tid,'formato':'COPA','fase':'Final','a':v[0],'b':v[1],'modo_copa':r['modo_copa'],'finalizado':'NÃO'})
-                                                            novos.append({'torneio_id':tid,'formato':'COPA','fase':'3º Lugar','a':p[0],'b':p[1],'modo_copa':r['modo_copa'],'finalizado':'NÃO'})
-                                                        elif r['fase'] == "Quartas" and len(v)>=4:
-                                                            for i in range(0, len(v), 2): novos.append({'torneio_id':tid,'formato':'COPA','fase':'Semifinal','a':v[i],'b':v[i+1],'modo_copa':r['modo_copa'],'finalizado':'NÃO'})
-                                                        if novos: df_db = pd.concat([df_db, pd.DataFrame(novos)], ignore_index=True)
-                                                salvar_dados(df_db, ABA_JOGOS); st.rerun()
+                                                status_fim = "SIM" if encerrar else "NÃO"
+                                                
+                                                # Bloqueio de erro: não deixa encerrar se empatar e não tiver vencedor nos pênaltis
+                                                if fmt == "COPA" and status_fim == "SIM" and sa == sb and pa == pb and r['a'] != "BYE" and r['b'] != "BYE":
+                                                    st.error("⚠️ Empate! Preencha o vencedor dos pênaltis antes de encerrar o confronto.")
+                                                else:
+                                                    df_db.loc[idx, ['gols_a','gols_b','ida_a','ida_b','volta_a','volta_b','pen_a','pen_b','finalizado']] = res + [pa, pb, status_fim]
+                                                    
+                                                    if fmt == "COPA" and status_fim == "SIM":
+                                                        df_fase = df_db[(df_db['torneio_id'] == tid) & (df_db['fase'] == r['fase'])]
+                                                        # Só gera a próxima fase se TODOS os jogos desta fase estiverem com 'encerrar' marcado
+                                                        if all(df_fase['finalizado'].apply(is_done)):
+                                                            v, p = [], []
+                                                            for _, rf in df_fase.iterrows():
+                                                                vw, pl = obter_vencedor_perdedor(rf)
+                                                                if vw: v.append(vw); p.append(pl)
+                                                            novos = []
+                                                            if r['fase'] == "Semifinal" and len(v)>=2:
+                                                                novos.append({'torneio_id':tid,'formato':'COPA','fase':'Final','a':v[0],'b':v[1],'modo_copa':modo_atual,'finalizado':'NÃO'})
+                                                                novos.append({'torneio_id':tid,'formato':'COPA','fase':'3º Lugar','a':p[0],'b':p[1],'modo_copa':modo_atual,'finalizado':'NÃO'})
+                                                            elif r['fase'] == "Quartas" and len(v)>=4:
+                                                                for i in range(0, len(v), 2): novos.append({'torneio_id':tid,'formato':'COPA','fase':'Semifinal','a':v[i],'b':v[i+1],'modo_copa':modo_atual,'finalizado':'NÃO'})
+                                                            if novos: df_db = pd.concat([df_db, pd.DataFrame(novos)], ignore_index=True)
+                                                    salvar_dados(df_db, ABA_JOGOS); st.rerun()
 
         elif menu == "📊 Consulta":
             if fmt == "LIGA":
@@ -1115,6 +1132,7 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
