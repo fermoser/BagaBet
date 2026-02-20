@@ -1242,13 +1242,15 @@ else:
                     nova_h = pd.DataFrame([{'torneio_id':tid,'formato':fmt,'campeao':c,'vice':v,'terceiro':t,'data_fim':h_br}])
                     salvar_dados(pd.concat([df_hist, nova_h], ignore_index=True), ABA_HISTORICO)
                     
-                    # A LINHA DE REMOÇÃO DO TORNEIO FOI APAGADA AQUI PARA MANTER O TORNEIO SALVO!
-                    
-                    st.session_state.torneio_ativo = None
+                    # Exclusão removida! O torneio continua salvo no banco de dados.
+                    # Pula direto para a aba de Consulta para você ver o pódio final!
+                    st.session_state.mostrar_baloes = True
+                    st.session_state.aba_atual = "📊 Consulta" 
                     st.rerun()
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
