@@ -1015,8 +1015,9 @@ else:
                                                             if vw: v.append(vw); p.append(pl)
                                                         novos = []
                                                         if r['fase'] == "Semifinal" and len(v)>=2:
-                                                            novos.append({'torneio_id':tid,'formato':'COPA','fase':'Final','a':v[0],'b':v[1],'modo_copa':'Só Ida','finalizado':'NÃO'})
-                                                            novos.append({'torneio_id':tid,'formato':'COPA','fase':'3º Lugar','a':p[0],'b':p[1],'modo_copa':'Só Ida','finalizado':'NÃO'})
+                                                            # Alterado para herdar o r['modo_copa'] em vez de forçar 'Só Ida'
+                                                            novos.append({'torneio_id':tid,'formato':'COPA','fase':'Final','a':v[0],'b':v[1],'modo_copa':r['modo_copa'],'finalizado':'NÃO'})
+                                                            novos.append({'torneio_id':tid,'formato':'COPA','fase':'3º Lugar','a':p[0],'b':p[1],'modo_copa':r['modo_copa'],'finalizado':'NÃO'})
                                                         elif r['fase'] == "Quartas" and len(v)>=4:
                                                             for i in range(0, len(v), 2): novos.append({'torneio_id':tid,'formato':'COPA','fase':'Semifinal','a':v[i],'b':v[i+1],'modo_copa':r['modo_copa'],'finalizado':'NÃO'})
                                                         if novos: df_db = pd.concat([df_db, pd.DataFrame(novos)], ignore_index=True)
@@ -1064,7 +1065,8 @@ else:
                             f_ini = "Semifinal" if len(times)<=4 else "Quartas"
                             for i in range(0, len(times), 2):
                                 t1, t2 = times[i], (times[i+1] if i+1 < len(times) else "BYE")
-                                jogos.append({'torneio_id':tid,'formato':'COPA','fase':f_ini,'a':t1,'b':t2,'modo_copa':'Só Ida','finalizado':'NÃO'})
+                                # Alterado para usar o modo_atual escolhido no menu
+                                jogos.append({'torneio_id':tid,'formato':'COPA','fase':f_ini,'a':t1,'b':t2,'modo_copa':modo_atual,'finalizado':'NÃO'})
                         
                         df_db = df_db[~((df_db['torneio_id'] == tid) & (df_db['fase'] == 'Setup'))]
                         salvar_dados(pd.concat([df_db, pd.DataFrame(jogos)], ignore_index=True), ABA_JOGOS); st.rerun()
@@ -1102,5 +1104,6 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
