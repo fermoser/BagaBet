@@ -1000,11 +1000,8 @@ else:
                                 if is_admin:
                                     with st.expander("✎ Editar Jogo"):
                                         with st.form(f"f_{idx}"):
-                                            # Garante o modo de disputa correto lendo a variável mestre do torneio
-                                            is_ida_volta = (fmt == "COPA" and modo_atual == "Ida e Volta")
-                                            
-                                            # Garante o modo de disputa correto lendo a variável mestre do torneio
-                                            is_ida_volta = (fmt == "COPA" and modo_atual == "Ida e Volta")
+                                            # Garante o modo de disputa correto, mas força jogo único para Final e 3º Lugar
+                                            is_ida_volta = (fmt == "COPA" and modo_atual == "Ida e Volta" and r['fase'] not in ["Final", "3º Lugar"])
                                             
                                             if is_ida_volta:
                                                 st.markdown("**⚽ JOGO DE IDA**")
@@ -1061,8 +1058,8 @@ else:
                                                                 if vw: v.append(vw); p.append(pl)
                                                             novos = []
                                                             if r['fase'] == "Semifinal" and len(v)>=2:
-                                                                novos.append({'torneio_id':tid,'formato':'COPA','fase':'Final','a':v[0],'b':v[1],'modo_copa':modo_atual,'finalizado':'NÃO'})
-                                                                novos.append({'torneio_id':tid,'formato':'COPA','fase':'3º Lugar','a':p[0],'b':p[1],'modo_copa':modo_atual,'finalizado':'NÃO'})
+                                                                novos.append({'torneio_id':tid,'formato':'COPA','fase':'Final','a':v[0],'b':v[1],'modo_copa':'Só Ida','finalizado':'NÃO'})
+                                                                novos.append({'torneio_id':tid,'formato':'COPA','fase':'3º Lugar','a':p[0],'b':p[1],'modo_copa':'Só Ida','finalizado':'NÃO'})
                                                             elif r['fase'] == "Quartas" and len(v)>=4:
                                                                 for i in range(0, len(v), 2): novos.append({'torneio_id':tid,'formato':'COPA','fase':'Semifinal','a':v[i],'b':v[i+1],'modo_copa':modo_atual,'finalizado':'NÃO'})
                                                             if novos: df_db = pd.concat([df_db, pd.DataFrame(novos)], ignore_index=True)
@@ -1233,6 +1230,7 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
