@@ -995,17 +995,26 @@ else:
                                             # Garante o modo de disputa correto lendo a variável mestre do torneio
                                             is_ida_volta = (fmt == "COPA" and modo_atual == "Ida e Volta")
                                             
+                                            # Garante o modo de disputa correto lendo a variável mestre do torneio
+                                            is_ida_volta = (fmt == "COPA" and modo_atual == "Ida e Volta")
+                                            
                                             if is_ida_volta:
-                                                c_ida, c_volta = st.columns(2)
-                                                ia = c_ida.number_input(f"Ida: {r['a']}", 0, 99, int(r['ida_a']), key=f"ia_{idx}")
-                                                ib = c_ida.number_input(f"Ida: {r['b']}", 0, 99, int(r['ida_b']), key=f"ib_{idx}")
-                                                va = c_volta.number_input(f"Volta: {r['a']}", 0, 99, int(r['volta_a']), key=f"va_{idx}")
-                                                vb = c_volta.number_input(f"Volta: {r['b']}", 0, 99, int(r['volta_b']), key=f"vb_{idx}")
+                                                st.markdown("**⚽ JOGO DE IDA**")
+                                                c_ida1, c_ida2 = st.columns(2)
+                                                ia = c_ida1.number_input(f"Gols {r['a']}", 0, 99, int(r['ida_a']), key=f"ia_{idx}")
+                                                ib = c_ida2.number_input(f"Gols {r['b']}", 0, 99, int(r['ida_b']), key=f"ib_{idx}")
+                                                
+                                                # A Volta fica escondida numa sanfona abaixo da Ida
+                                                with st.expander("🔄 INSERIR JOGO DE VOLTA", expanded=False):
+                                                    st.caption(f"Mando de campo invertido: {r['b']} x {r['a']}")
+                                                    c_vol1, c_vol2 = st.columns(2)
+                                                    vb = c_vol1.number_input(f"Gols {r['b']} (Casa)", 0, 99, int(r['volta_b']), key=f"vb_{idx}")
+                                                    va = c_vol2.number_input(f"Gols {r['a']} (Fora)", 0, 99, int(r['volta_a']), key=f"va_{idx}")
+                                                    
                                                 res, sa, sb = [ia+va, ib+vb, ia, ib, va, vb], (ia+va), (ib+vb)
                                                 
-                                                # Trava para não avançar de fase antes da hora
                                                 st.markdown("---")
-                                                encerrar = st.checkbox("✅ Encerrar Confronto (Marque apenas após o jogo de Volta para avançar de fase)", value=is_done(r['finalizado']), key=f"chk_{idx}")
+                                                encerrar = st.checkbox("✅ Encerrar Confronto (Avançar de Fase)", value=is_done(r['finalizado']), key=f"chk_{idx}")
                                             else:
                                                 ca, cb = st.columns(2)
                                                 ga = ca.number_input(f"{r['a']}", 0, 99, int(r['gols_a']), key=f"ga_{idx}")
@@ -1132,6 +1141,7 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
