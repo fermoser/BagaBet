@@ -992,17 +992,28 @@ else:
                                 if is_admin:
                                     with st.expander("✎ Editar Jogo"):
                                         with st.form(f"f_{idx}"):
-                                            ca, cb = st.columns(2)
-                                            if fmt=="LIGA" or r['modo_copa']=="Só Ida":
-                                                ga, gb = ca.number_input("Gols A",0,99,int(r['gols_a'])), cb.number_input("Gols B",0,99,int(r['gols_b']))
-                                                res, sa, sb = [ga, gb, ga, gb, 0, 0], ga, gb
-                                            else:
-                                                ia, ib = ca.number_input("Ida A",0,99,int(r['ida_a'])), cb.number_input("Ida B",0,99,int(r['ida_b']))
-                                                va, vb = ca.number_input("Volta A",0,99,int(r['volta_a'])), cb.number_input("Volta B",0,99,int(r['volta_b']))
+                                            # Se for COPA e o modo for Ida e Volta, abre os 4 campos
+                                            if fmt == "COPA" and r['modo_copa'] == "Ida e Volta":
+                                                c_ida, c_volta = st.columns(2)
+                                                ia = c_ida.number_input(f"Ida: {r['a']}", 0, 99, int(r['ida_a']), key=f"ia_{idx}")
+                                                ib = c_ida.number_input(f"Ida: {r['b']}", 0, 99, int(r['ida_b']), key=f"ib_{idx}")
+                                                va = c_volta.number_input(f"Volta: {r['a']}", 0, 99, int(r['volta_a']), key=f"va_{idx}")
+                                                vb = c_volta.number_input(f"Volta: {r['b']}", 0, 99, int(r['volta_b']), key=f"vb_{idx}")
                                                 res, sa, sb = [ia+va, ib+vb, ia, ib, va, vb], (ia+va), (ib+vb)
+                                            else:
+                                                ca, cb = st.columns(2)
+                                                ga = ca.number_input(f"{r['a']}", 0, 99, int(r['gols_a']), key=f"ga_{idx}")
+                                                gb = cb.number_input(f"{r['b']}", 0, 99, int(r['gols_b']), key=f"gb_{idx}")
+                                                res, sa, sb = [ga, gb, ga, gb, 0, 0], ga, gb
+                                            
                                             pa, pb = 0, 0
+                                            # Correção do Alinhamento dos Pênaltis
                                             if fmt == "COPA" and sa == sb and r['a'] != "BYE" and r['b'] != "BYE":
-                                                pa, pb = st.columns(2)[0].number_input("Pen A",0,99,int(r['pen_a'])), st.columns(2)[1].number_input("Pen B",0,99,int(r['pen_b']))
+                                                st.markdown("---")
+                                                st.caption("🏆 Decisão por Pênaltis")
+                                                cp1, cp2 = st.columns(2)
+                                                pa = cp1.number_input(f"Pênaltis {r['a']}", 0, 99, int(r['pen_a']), key=f"pa_{idx}")
+                                                pb = cp2.number_input(f"Pênaltis {r['b']}", 0, 99, int(r['pen_b']), key=f"pb_{idx}")
                                             
                                             if st.form_submit_button("Salvar"):
                                                 df_db.loc[idx, ['gols_a','gols_b','ida_a','ida_b','volta_a','volta_b','pen_a','pen_b','finalizado']] = res + [pa, pb, "SIM"]
@@ -1104,6 +1115,7 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
