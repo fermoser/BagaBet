@@ -699,13 +699,34 @@ else:
             round_idx = len(st.session_state.rounds)
             st.title(f"⚔️ Fase Suíça - Rodada {round_idx}")
             
+            # --- EXIBIR RODADAS ANTERIORES (HISTÓRICO) ---
+            if round_idx > 1:
+                with st.expander("⏪ Ver Histórico de Rodadas Anteriores", expanded=False):
+                    for i in range(round_idx - 1):
+                        r_data = st.session_state.rounds[i]
+                        st.markdown(f"**📌 Rodada {i+1}**")
+                        if r_data.get('bye'):
+                            st.write(f"🎉 *BYE (Folga): {r_data['bye']['name']}*")
+                        for m in r_data['matches']:
+                            h_name = next((t['name'] for t in st.session_state.teams if t['id'] == m['home']), "Time A")
+                            a_name = next((t['name'] for t in st.session_state.teams if t['id'] == m['away']), "Time B")
+                            winner_name = h_name if m.get('winner_id') == m['home'] else a_name
+                            
+                            # Verifica se teve pênaltis (evita erro se a chave não existir)
+                            tem_penaltis = 'h_pen' in m and m['h_pen'] is not None
+                            pen_txt = f" (Pên: {m['h_pen']} x {m['a_pen']})" if tem_penaltis and (m['h_pen'] > 0 or m['a_pen'] > 0) else ""
+                            
+                            st.write(f"⚽ {h_name} **{m['home_score']} x {m['away_score']}** {a_name}{pen_txt} ➡️ Venceu: **{winner_name}**")
+                        st.divider()
+            # ----------------------------------------------
+            
+            st.markdown(f"### ⚡ Rodada Atual: {round_idx}")
             current_round = st.session_state.rounds[-1]
             matches = current_round['matches']
             bye_team = current_round['bye']
             
             if bye_team:
                 st.success(f"🎉 **BYE:** O time **{bye_team['name']}** folga nesta rodada e ganha +1 Vitória.")
-
             tab_jogos, tab_regras = st.tabs(["⚽ Jogos da Rodada", "📜 Regulamento"])
 
             with tab_regras:
@@ -1230,6 +1251,7 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
