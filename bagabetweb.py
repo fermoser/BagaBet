@@ -34,7 +34,7 @@ ABA_HISTORICO = "Historico"
 ABA_SUICO = "suico"
 COLUNAS = ['torneio_id', 'formato', 'fase', 'a', 'b', 'finalizado', 'gols_a', 'gols_b', 'ida_a', 'ida_b', 'volta_a', 'volta_b', 'pen_a', 'pen_b', 'modo_copa']
 
-ORDEM_FASES = {"Oitavas": 1, "Quartas": 2, "Semifinal": 3, "3º Lugar": 4, "Final": 5, "Liga": 6, "Turno Único": 6}
+ORDEM_FASES = {"Oitavas": 1, "Quartas": 2, "Semifinal": 3, "3º Lugar": 4, "Final": 5, "Turno Único": 6, "Turno": 7, "Returno": 8, "Liga": 9}
 
 # --- TEXTO DO REGULAMENTO SUÍÇO ---
 REGULAMENTO_TXT = """
@@ -529,14 +529,16 @@ if st.session_state.torneio_ativo is None:
         c1, c2, c3 = st.columns(3)
         n = c1.text_input("Nome")
         st.session_state.temp_fmt = c2.selectbox("Tipo", ["COPA", "LIGA", "SUÍÇO"])
-        m = c3.selectbox("Modo", ["Só Ida", "Ida e Volta"]) if st.session_state.temp_fmt == "COPA" else "Só Ida"
+        opcoes_modo = ["Só Ida", "Ida e Volta"] if st.session_state.temp_fmt in ["COPA", "LIGA"] else ["Só Ida"]
+        m = c3.selectbox("Modo", opcoes_modo)
         
         if st.form_submit_button("CRIAR"):
             if n: 
                 if st.session_state.temp_fmt == "SUÍÇO":
                     for key in keys_suico: st.session_state[key] = keys_suico[key]
                 
-                novo_t = pd.DataFrame([{'torneio_id': n, 'formato': st.session_state.temp_fmt, 'fase': 'Setup', 'finalizado': 'NÃO'}])
+                # Agora salvamos o modo escolhido (m) no banco de dados da criação
+                novo_t = pd.DataFrame([{'torneio_id': n, 'formato': st.session_state.temp_fmt, 'fase': 'Setup', 'finalizado': 'NÃO', 'modo_copa': m}])
                 salvar_dados(pd.concat([df_db, novo_t], ignore_index=True), ABA_JOGOS)
                 
                 st.session_state.torneio_ativo = n
@@ -546,7 +548,8 @@ else:
     tid = st.session_state.torneio_ativo
     df_t = df_db[df_db['torneio_id'] == tid].copy()
     fmt = df_t['formato'].iloc[0] if not df_t.empty else st.session_state.temp_fmt
-
+    modo_atual = df_t['modo_copa'].iloc[0] if not df_t.empty and 'modo_copa' in df_t.columns and pd.notna(df_t['modo_copa'].iloc[0]) else "Só Ida"
+    
     with st.sidebar:
         st.header(f"🏆 {tid}")
         
@@ -947,52 +950,52 @@ else:
     # ==========================================
     else:
         if menu == "🏟️ Jogos":
-            if df_t.empty: st.info("Gere os jogos no Admin.")
+            if df_t.empty or len(df_t[df_t['fase'] != 'Setup']) == 0: st.info("Gere os jogos no Admin.")
             else:
                 for f in sorted(df_t['fase'].unique(), key=lambda x: ORDEM_FASES.get(x, 99)):
-                    st.subheader(f"📍 {f}")
-                    for idx, r in df_t[df_t['fase'] == f].iterrows():
-                        if r['fase'] == "Setup": continue
-                        with st.container(border=True):
-                            c1, c2, c3 = st.columns([2,1,2])
-                            p_txt = f"{r['gols_a']} x {r['gols_b']}" if r['modo_copa']=="Só Ida" or fmt=="LIGA" else f"({r['ida_a']}) {r['volta_a']} x {r['volta_b']} ({r['ida_b']})"
-                            if is_done(r['finalizado']) and (int(r['pen_a'])+int(r['pen_b'])>0): p_txt += f" (P: {r['pen_a']}x{r['pen_b']})"
-                            c1.markdown(f"<p style='text-align:right'><b>{r['a']}</b></p>", unsafe_allow_html=True)
-                            c2.markdown(f"<div style='text-align:center; background:#eee; padding:5px; color:black;'>{p_txt}</div>", unsafe_allow_html=True)
-                            c3.markdown(f"<p style='text-align:left'><b>{r['b']}</b></p>", unsafe_allow_html=True)
-                            
-                            if is_admin:
-                                with st.expander("✎ Editar"):
-                                    with st.form(f"f_{idx}"):
-                                        ca, cb = st.columns(2)
-                                        if fmt=="LIGA" or r['modo_copa']=="Só Ida":
-                                            ga, gb = ca.number_input("Gols A",0,99,int(r['gols_a'])), cb.number_input("Gols B",0,99,int(r['gols_b']))
-                                            res, sa, sb = [ga, gb, ga, gb, 0, 0], ga, gb
-                                        else:
-                                            ia, ib = ca.number_input("Ida A",0,99,int(r['ida_a'])), cb.number_input("Ida B",0,99,int(r['ida_b']))
-                                            va, vb = ca.number_input("Volta A",0,99,int(r['volta_a'])), cb.number_input("Volta B",0,99,int(r['volta_b']))
-                                            res, sa, sb = [ia+va, ib+vb, ia, ib, va, vb], (ia+va), (ib+vb)
-                                        pa, pb = 0, 0
-                                        if fmt == "COPA" and sa == sb and r['a'] != "BYE" and r['b'] != "BYE":
-                                            pa, pb = st.columns(2)[0].number_input("Pen A",0,99,int(r['pen_a'])), st.columns(2)[1].number_input("Pen B",0,99,int(r['pen_b']))
-                                        
-                                        if st.form_submit_button("Salvar"):
-                                            df_db.loc[idx, ['gols_a','gols_b','ida_a','ida_b','volta_a','volta_b','pen_a','pen_b','finalizado']] = res + [pa, pb, "SIM"]
-                                            if fmt == "COPA":
-                                                df_fase = df_db[(df_db['torneio_id'] == tid) & (df_db['fase'] == r['fase'])]
-                                                if all(df_fase['finalizado'].apply(is_done)):
-                                                    v, p = [], []
-                                                    for _, rf in df_fase.iterrows():
-                                                        vw, pl = obter_vencedor_perdedor(rf)
-                                                        if vw: v.append(vw); p.append(pl)
-                                                    novos = []
-                                                    if r['fase'] == "Semifinal" and len(v)>=2:
-                                                        novos.append({'torneio_id':tid,'formato':'COPA','fase':'Final','a':v[0],'b':v[1],'modo_copa':'Só Ida','finalizado':'NÃO'})
-                                                        novos.append({'torneio_id':tid,'formato':'COPA','fase':'3º Lugar','a':p[0],'b':p[1],'modo_copa':'Só Ida','finalizado':'NÃO'})
-                                                    elif r['fase'] == "Quartas" and len(v)>=4:
-                                                        for i in range(0, len(v), 2): novos.append({'torneio_id':tid,'formato':'COPA','fase':'Semifinal','a':v[i],'b':v[i+1],'modo_copa':r['modo_copa'],'finalizado':'NÃO'})
-                                                    if novos: df_db = pd.concat([df_db, pd.DataFrame(novos)], ignore_index=True)
-                                            salvar_dados(df_db, ABA_JOGOS); st.rerun()
+                    if f == "Setup": continue
+                    with st.expander(f"📍 {f}", expanded=True): # Transforma a fase em um menu sanfona
+                        for idx, r in df_t[df_t['fase'] == f].iterrows():
+                            with st.container(border=True):
+                                c1, c2, c3 = st.columns([2,1,2])
+                                p_txt = f"{r['gols_a']} x {r['gols_b']}" if r['modo_copa']=="Só Ida" or fmt=="LIGA" else f"({r['ida_a']}) {r['volta_a']} x {r['volta_b']} ({r['ida_b']})"
+                                if is_done(r['finalizado']) and (int(r['pen_a'])+int(r['pen_b'])>0): p_txt += f" (P: {r['pen_a']}x{r['pen_b']})"
+                                c1.markdown(f"<p style='text-align:right'><b>{r['a']}</b></p>", unsafe_allow_html=True)
+                                c2.markdown(f"<div style='text-align:center; background:#eee; padding:5px; color:black;'>{p_txt}</div>", unsafe_allow_html=True)
+                                c3.markdown(f"<p style='text-align:left'><b>{r['b']}</b></p>", unsafe_allow_html=True)
+                                
+                                if is_admin:
+                                    with st.expander("✎ Editar Jogo"):
+                                        with st.form(f"f_{idx}"):
+                                            ca, cb = st.columns(2)
+                                            if fmt=="LIGA" or r['modo_copa']=="Só Ida":
+                                                ga, gb = ca.number_input("Gols A",0,99,int(r['gols_a'])), cb.number_input("Gols B",0,99,int(r['gols_b']))
+                                                res, sa, sb = [ga, gb, ga, gb, 0, 0], ga, gb
+                                            else:
+                                                ia, ib = ca.number_input("Ida A",0,99,int(r['ida_a'])), cb.number_input("Ida B",0,99,int(r['ida_b']))
+                                                va, vb = ca.number_input("Volta A",0,99,int(r['volta_a'])), cb.number_input("Volta B",0,99,int(r['volta_b']))
+                                                res, sa, sb = [ia+va, ib+vb, ia, ib, va, vb], (ia+va), (ib+vb)
+                                            pa, pb = 0, 0
+                                            if fmt == "COPA" and sa == sb and r['a'] != "BYE" and r['b'] != "BYE":
+                                                pa, pb = st.columns(2)[0].number_input("Pen A",0,99,int(r['pen_a'])), st.columns(2)[1].number_input("Pen B",0,99,int(r['pen_b']))
+                                            
+                                            if st.form_submit_button("Salvar"):
+                                                df_db.loc[idx, ['gols_a','gols_b','ida_a','ida_b','volta_a','volta_b','pen_a','pen_b','finalizado']] = res + [pa, pb, "SIM"]
+                                                if fmt == "COPA":
+                                                    df_fase = df_db[(df_db['torneio_id'] == tid) & (df_db['fase'] == r['fase'])]
+                                                    if all(df_fase['finalizado'].apply(is_done)):
+                                                        v, p = [], []
+                                                        for _, rf in df_fase.iterrows():
+                                                            vw, pl = obter_vencedor_perdedor(rf)
+                                                            if vw: v.append(vw); p.append(pl)
+                                                        novos = []
+                                                        if r['fase'] == "Semifinal" and len(v)>=2:
+                                                            novos.append({'torneio_id':tid,'formato':'COPA','fase':'Final','a':v[0],'b':v[1],'modo_copa':'Só Ida','finalizado':'NÃO'})
+                                                            novos.append({'torneio_id':tid,'formato':'COPA','fase':'3º Lugar','a':p[0],'b':p[1],'modo_copa':'Só Ida','finalizado':'NÃO'})
+                                                        elif r['fase'] == "Quartas" and len(v)>=4:
+                                                            for i in range(0, len(v), 2): novos.append({'torneio_id':tid,'formato':'COPA','fase':'Semifinal','a':v[i],'b':v[i+1],'modo_copa':r['modo_copa'],'finalizado':'NÃO'})
+                                                        if novos: df_db = pd.concat([df_db, pd.DataFrame(novos)], ignore_index=True)
+                                                salvar_dados(df_db, ABA_JOGOS); st.rerun()
 
         elif menu == "📊 Consulta":
             if fmt == "LIGA":
@@ -1026,7 +1029,12 @@ else:
                     if len(times)>=2:
                         jogos = []
                         if fmt == "LIGA":
-                            for a, b in combinations(times, 2): jogos.append({'torneio_id':tid,'formato':'LIGA','fase':'Liga','a':a,'b':b,'modo_copa':'Só Ida','finalizado':'NÃO'})
+                            nome_fase = "Turno Único" if modo_atual == "Só Ida" else "Turno"
+                            for a, b in combinations(times, 2): 
+                                jogos.append({'torneio_id':tid,'formato':'LIGA','fase':nome_fase,'a':a,'b':b,'modo_copa':'Só Ida','finalizado':'NÃO'})
+                            if modo_atual == "Ida e Volta":
+                                for a, b in combinations(times, 2):
+                                    jogos.append({'torneio_id':tid,'formato':'LIGA','fase':'Returno','a':b,'b':a,'modo_copa':'Só Ida','finalizado':'NÃO'})
                         else:
                             f_ini = "Semifinal" if len(times)<=4 else "Quartas"
                             for i in range(0, len(times), 2):
@@ -1069,3 +1077,4 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
