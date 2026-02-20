@@ -746,8 +746,8 @@ else:
                         away_name = next(t['name'] for t in st.session_state.teams if t['id'] == match['away'])
                         
                         with c1: st.markdown(f"<h3 style='text-align: right'>{home_name}</h3>", unsafe_allow_html=True)
-                        with c2: s1 = st.number_input("Gols", min_value=0, value=None, key=f"h_{round_idx}_{i}", disabled=disabled_score)
-                        with c3: s2 = st.number_input("Gols", min_value=0, value=None, key=f"a_{round_idx}_{i}", disabled=disabled_score)
+                        with c2: s1 = st.number_input("Gols", min_value=0, value=0, step=1, key=f"h_{round_idx}_{i}", disabled=disabled_score)
+                        with c3: s2 = st.number_input("Gols", min_value=0, value=0, step=1, key=f"a_{round_idx}_{i}", disabled=disabled_score)
                         with c4: st.markdown(f"<h3>{away_name}</h3>", unsafe_allow_html=True)
                         
                         pen_h = 0
@@ -756,8 +756,8 @@ else:
                         if st.session_state.swiss_asking_penalties and s1 is not None and s2 is not None and s1 == s2:
                             st.warning("⚠️ Empate! Decisão por pênaltis:")
                             cp1, cp2 = st.columns(2)
-                            with cp1: pen_h = st.number_input(f"Pênaltis {home_name}", min_value=0, value=None, key=f"swiss_pen_h_{i}")
-                            with cp2: pen_a = st.number_input(f"Pênaltis {away_name}", min_value=0, value=None, key=f"swiss_pen_a_{i}")
+                            with cp1: pen_h = st.number_input(f"Pênaltis {home_name}", min_value=0, value=0, step=1, key=f"swiss_pen_h_{i}")
+                            with cp2: pen_a = st.number_input(f"Pênaltis {away_name}", min_value=0, value=0, step=1, key=f"swiss_pen_a_{i}")
                             any_draw = True
                         
                         matches_data_input.append({'match_idx': i, 'home_id': match['home'], 'away_id': match['away'], 'h_g': s1, 'a_g': s2, 'h_p': pen_h, 'a_p': pen_a})
@@ -863,9 +863,9 @@ else:
                         disabled_score = st.session_state.playoff_asking_penalties
                         
                         with col1: st.markdown(f"<h3 style='text-align: right'>{home['name']}</h3>", unsafe_allow_html=True)
-                        with col2: val_h = st.number_input("Gols", min_value=0, value=None, key=f"pg_h_{round_id}_{i}", disabled=disabled_score)
+                        with col2: val_h = st.number_input("Gols", min_value=0, value=0, step=1, key=f"pg_h_{round_id}_{i}", disabled=disabled_score)
                         with col3: st.markdown("<h3 style='text-align: center'>X</h3>", unsafe_allow_html=True)
-                        with col4: val_a = st.number_input("Gols", min_value=0, value=None, key=f"pg_a_{round_id}_{i}", disabled=disabled_score)
+                        with col4: val_a = st.number_input("Gols", min_value=0, value=0, step=1, key=f"pg_a_{round_id}_{i}", disabled=disabled_score)
                         with col5: st.markdown(f"<h3>{away['name']}</h3>", unsafe_allow_html=True)
                         
                         pen_h = 0
@@ -1250,6 +1250,7 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
