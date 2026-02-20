@@ -643,7 +643,15 @@ else:
                     st.download_button("📥 Baixar Histórico de Jogos (CSV)", csv_matches, 'historico_partidas.csv', 'text/csv')
 
         else:
-            menu = st.radio("Menu", ["🏟️ Jogos", "📊 Consulta", "⚙️ Admin"], key="menu_lateral")
+            # Cria a variável de controle solta, sem travar no widget
+            if 'aba_atual' not in st.session_state: st.session_state.aba_atual = "🏟️ Jogos"
+            
+            opcoes_menu = ["🏟️ Jogos", "📊 Consulta", "⚙️ Admin"]
+            idx_menu = opcoes_menu.index(st.session_state.aba_atual) if st.session_state.aba_atual in opcoes_menu else 0
+            
+            menu = st.radio("Menu", opcoes_menu, index=idx_menu)
+            st.session_state.aba_atual = menu # Atualiza a escolha naturalmente
+            
             is_admin = (st.text_input("Senha Admin", type="password") == "1234")
             if st.button("🏠 Voltar ao Menu Inicial"): 
                 st.session_state.torneio_ativo = None
@@ -1063,7 +1071,7 @@ else:
                                                     df_atualizado = df_db[df_db['torneio_id'] == tid]
                                                     jogos_validos = df_atualizado[df_atualizado['fase'] != 'Setup']
                                                     if not jogos_validos.empty and all(jogos_validos['finalizado'].apply(is_done)):
-                                                        st.session_state.menu_lateral = "📊 Consulta"
+                                                        st.session_state.aba_atual = "📊 Consulta"
                                                         st.session_state.mostrar_baloes = True
                                                     
                                                     salvar_dados(df_db, ABA_JOGOS); st.rerun()
@@ -1225,6 +1233,7 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
