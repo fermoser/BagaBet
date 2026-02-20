@@ -994,10 +994,8 @@ else:
                 
                 salvar_dados(pd.concat([df_hist, nova_h], ignore_index=True), ABA_HISTORICO)
                 
-                # A LINHA DE REMOÇÃO DO TORNEIO FOI APAGADA AQUI PARA MANTER O TORNEIO SALVO!
-                
-                st.session_state.torneio_ativo = None
-                st.rerun()
+                # Exclusão removida! O torneio continua salvo.
+                st.success("✅ Torneio encerrado e salvo no Hall da Fama com sucesso!")
 
     # ==========================================
     # FLUXO COPA / LIGA
@@ -1251,6 +1249,7 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
