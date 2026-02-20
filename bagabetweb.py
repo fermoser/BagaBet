@@ -524,25 +524,50 @@ if st.session_state.torneio_ativo is None:
                 st.rerun()
 
     st.divider()
-    with st.form("novo_t"):
-        st.subheader("🆕 Criar Novo")
-        c1, c2, c3 = st.columns(3)
-        n = c1.text_input("Nome")
-        st.session_state.temp_fmt = c2.selectbox("Tipo", ["COPA", "LIGA", "SUÍÇO"])
-        opcoes_modo = ["Só Ida", "Ida e Volta"] if st.session_state.temp_fmt in ["COPA", "LIGA"] else ["Só Ida"]
-        m = c3.selectbox("Modo", opcoes_modo)
+    st.subheader("🆕 Criar Novo Torneio")
+    
+    n = st.text_input("Nome do Torneio", placeholder="Ex: Copa dos Campeões")
+    
+    st.markdown("##### 🎮 Escolha o Formato:")
+    
+    # Criamos 3 colunas para os blocos (botões grandes com ícones)
+    c1, c2, c3 = st.columns(3)
+    
+    with c1:
+        if st.button("🏆\n\nMODO COPA", use_container_width=True, type="primary" if st.session_state.temp_fmt == "COPA" else "secondary"):
+            st.session_state.temp_fmt = "COPA"
+            st.rerun()
+    with c2:
+        if st.button("📊\n\nMODO LIGA", use_container_width=True, type="primary" if st.session_state.temp_fmt == "LIGA" else "secondary"):
+            st.session_state.temp_fmt = "LIGA"
+            st.rerun()
+    with c3:
+        if st.button("⚔️\n\nMODO SUÍÇO", use_container_width=True, type="primary" if st.session_state.temp_fmt == "SUÍÇO" else "secondary"):
+            st.session_state.temp_fmt = "SUÍÇO"
+            st.rerun()
+
+    # Linha final com o modo de disputa (Ida/Volta) e o Botão de Criar
+    st.markdown("<br>", unsafe_allow_html=True)
+    c_modo, c_btn = st.columns([1, 2])
+    
+    opcoes_modo = ["Só Ida", "Ida e Volta"] if st.session_state.temp_fmt in ["COPA", "LIGA"] else ["Só Ida"]
+    with c_modo:
+        m = st.selectbox("Modo de Disputa", opcoes_modo)
         
-        if st.form_submit_button("CRIAR"):
+    with c_btn:
+        st.markdown("<br>", unsafe_allow_html=True) # Espaçamento invisível para alinhar o botão com o selectbox
+        if st.button("✅ CONFIRMAR E CRIAR", type="primary", use_container_width=True):
             if n: 
                 if st.session_state.temp_fmt == "SUÍÇO":
                     for key in keys_suico: st.session_state[key] = keys_suico[key]
                 
-                # Agora salvamos o modo escolhido (m) no banco de dados da criação
                 novo_t = pd.DataFrame([{'torneio_id': n, 'formato': st.session_state.temp_fmt, 'fase': 'Setup', 'finalizado': 'NÃO', 'modo_copa': m}])
                 salvar_dados(pd.concat([df_db, novo_t], ignore_index=True), ABA_JOGOS)
                 
                 st.session_state.torneio_ativo = n
                 st.rerun()
+            else:
+                st.warning("⚠️ Por favor, digite um nome para o torneio!")
 
 else:
     tid = st.session_state.torneio_ativo
@@ -1077,4 +1102,5 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
