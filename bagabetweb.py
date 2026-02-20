@@ -644,7 +644,7 @@ else:
 
         else:
             menu = st.radio("Menu", ["🏟️ Jogos", "📊 Consulta", "⚙️ Admin"], key="menu_lateral")
-        is_admin = (st.text_input("Senha Admin", type="password") == "1234")
+            is_admin = (st.text_input("Senha Admin", type="password") == "1234")
             if st.button("🏠 Voltar ao Menu Inicial"): 
                 st.session_state.torneio_ativo = None
                 st.rerun()
@@ -1225,6 +1225,7 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
