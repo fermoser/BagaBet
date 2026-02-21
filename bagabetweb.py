@@ -87,7 +87,7 @@ def carregar_dados(aba):
     try:
         df = conn.read(worksheet=aba, ttl="0s")
         if df is None or df.empty:
-            return pd.DataFrame(columns=COLUNAS) if aba == ABA_JOGOS else pd.DataFrame(columns=['torneio_id','formato','campeao','vice','terceiro','data_fim', 'placar'])
+            return pd.DataFrame(columns=COLUNAS) if aba == ABA_JOGOS else pd.DataFrame(columns=['torneio_id','formato','campeao','vice','terceiro','data_fim', 'placar', 'gols_campeao', 'gols_vice'])
         df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
         if aba == ABA_JOGOS:
             for c in COLUNAS:
@@ -590,23 +590,64 @@ if st.session_state.torneio_ativo is None:
                     
             with rank_a:
                 df_rank_ami = df_hist[df_hist['formato'] == 'AMISTOSO'].copy()
-                # Remove os jogos antigos da contagem (onde o placar estava no nome do campeão)
+                # Ignora amistosos antigos salvos da forma errada
                 df_rank_ami = df_rank_ami[~df_rank_ami['campeao'].str.contains(' x ', na=False)]
                 
                 if not df_rank_ami.empty:
-                    vitorias = df_rank_ami['campeao'].value_counts().rename('✅ Vitórias')
-                    derrotas = df_rank_ami['vice'].value_counts().rename('❌ Derrotas')
+                    # Levanta todos os jogadores únicos
+                    jogadores = set(df_rank_ami['campeao'].dropna().unique()) | set(df_rank_ami['vice'].dropna().unique())
+                    if "Empate" in jogadores: jogadores.remove("Empate")
+                    if "---" in jogadores: jogadores.remove("---")
                     
-                    df_ami_stats = pd.concat([vitorias, derrotas], axis=1).fillna(0).astype(int)
-                    if "Empate" in df_ami_stats.index: df_ami_stats = df_ami_stats.drop("Empate")
-                    if "---" in df_ami_stats.index: df_ami_stats = df_ami_stats.drop("---")
+                    stats_ami = {jg: {'⚔️ Jogos':0, '✅ Vitórias':0, '❌ Derrotas':0, '⚽ GP':0, '🥅 GC':0, 'fregueses': []} for jg in jogadores}
                     
-                    df_ami_stats['⚔️ Jogos'] = df_ami_stats['✅ Vitórias'] + df_ami_stats['❌ Derrotas']
-                    df_ami_stats = df_ami_stats.sort_values(by=['✅ Vitórias', '❌ Derrotas'], ascending=[False, True]).reset_index().rename(columns={'index': 'Clube / Player'})
+                    for _, r in df_rank_ami.iterrows():
+                        c, v = r.get('campeao', '---'), r.get('vice', '---')
+                        
+                        # Pega os gols de forma segura (0 se for jogo antigo sem saldo)
+                        gc = int(r['gols_campeao']) if 'gols_campeao' in r and pd.notna(r['gols_campeao']) and str(r['gols_campeao']).strip() != "" else 0
+                        gv = int(r['gols_vice']) if 'gols_vice' in r and pd.notna(r['gols_vice']) and str(r['gols_vice']).strip() != "" else 0
+                        
+                        if c in stats_ami:
+                            stats_ami[c]['✅ Vitórias'] += 1
+                            stats_ami[c]['⚔️ Jogos'] += 1
+                            stats_ami[c]['⚽ GP'] += gc
+                            stats_ami[c]['🥅 GC'] += gv
+                            # Registra quem ele derrotou na lista de fregueses
+                            if v != "Empate" and v != "---": stats_ami[c]['fregueses'].append(v)
+                                
+                        if v in stats_ami:
+                            stats_ami[v]['❌ Derrotas'] += 1
+                            stats_ami[v]['⚔️ Jogos'] += 1
+                            stats_ami[v]['⚽ GP'] += gv
+                            stats_ami[v]['🥅 GC'] += gc
+                            
+                    for jg, data in stats_ami.items():
+                        data['📊 SG'] = data['⚽ GP'] - data['🥅 GC']
+                        
+                        # Calcula o Maior Freguês (quem aparece mais vezes na lista de derrotados)
+                        if data['fregueses']:
+                            fregues = pd.Series(data['fregueses']).mode()[0]
+                            qtd = data['fregueses'].count(fregues)
+                            data['🫂 Maior Freguês'] = f"{fregues} ({qtd}x)"
+                        else:
+                            data['🫂 Maior Freguês'] = "---"
+                            
+                        # Removemos a lista para o Pandas não bugar ao criar a tabela
+                        del data['fregueses']
+                        
+                    df_ami_stats = pd.DataFrame.from_dict(stats_ami, orient='index')
                     
-                    st.dataframe(df_ami_stats, use_container_width=True, hide_index=True)
+                    if not df_ami_stats.empty:
+                        # Ordena: Mais vitórias, depois melhor saldo de gols (SG), depois mais gols pró (GP)
+                        df_ami_stats = df_ami_stats.sort_values(by=['✅ Vitórias', '📊 SG', '⚽ GP'], ascending=[False, False, False]).reset_index().rename(columns={'index': 'Clube / Player'})
+                        
+                        # Organiza as colunas na ordem visual certa
+                        df_ami_stats = df_ami_stats[['Clube / Player', '⚔️ Jogos', '✅ Vitórias', '❌ Derrotas', '⚽ GP', '🥅 GC', '📊 SG', '🫂 Maior Freguês']]
+                        
+                        st.dataframe(df_ami_stats, use_container_width=True, hide_index=True)
                 else:
-                    st.info("Jogue novos amistosos para gerar o ranking de vitórias!")
+                    st.info("Jogue novos amistosos para gerar o ranking detalhado!")
                 
     torneios = df_db['torneio_id'].unique() if not df_db.empty else []
     if len(torneios) > 0:
@@ -1357,25 +1398,25 @@ else:
                         h_br = (datetime.utcnow() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
                         j = df_t.iloc[0]
                         
-                        # 1. MÁGICA AQUI: Pega quem ganhou e quem perdeu de verdade
                         campeao_ami, vice_ami = obter_vencedor_perdedor(j)
-                        if not campeao_ami: # Se der empate
-                            campeao_ami, vice_ami = "Empate", "Empate"
                         
-                        # 2. Monta o texto do placar para salvar separado
+                        # NOVA LÓGICA: Pega os gols exatos de quem ganhou e quem perdeu
+                        g_camp = int(j['gols_a']) if campeao_ami == j['a'] else int(j['gols_b'])
+                        g_vice = int(j['gols_b']) if campeao_ami == j['a'] else int(j['gols_a'])
+                        
+                        if not campeao_ami: # Caso de Empate
+                            campeao_ami, vice_ami = "Empate", "Empate"
+                            g_camp, g_vice = int(j['gols_a']), int(j['gols_b'])
+                            
                         res_txt = f"{j['a']} {int(j['gols_a'])} x {int(j['gols_b'])} {j['b']}"
                         if int(j['pen_a']) > 0 or int(j['pen_b']) > 0:
                             res_txt += f" (P: {int(j['pen_a'])}x{int(j['pen_b'])})"
 
-                        # 3. Guarda Vencedor, Perdedor e o Placar na nova coluna
                         nova_h = pd.DataFrame([{
-                            'torneio_id': tid, 
-                            'formato': 'AMISTOSO', 
-                            'campeao': campeao_ami, 
-                            'vice': vice_ami, 
-                            'terceiro': '---', 
-                            'data_fim': h_br,
-                            'placar': res_txt  # <--- NOVA COLUNA
+                            'torneio_id': tid, 'formato': 'AMISTOSO', 
+                            'campeao': campeao_ami, 'vice': vice_ami, 'terceiro': '---', 
+                            'data_fim': h_br, 'placar': res_txt,
+                            'gols_campeao': g_camp, 'gols_vice': g_vice # <--- Salvando Gols AQUI!
                         }])
                         
                         salvar_dados(pd.concat([df_hist, nova_h], ignore_index=True), ABA_HISTORICO)
@@ -1531,6 +1572,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
