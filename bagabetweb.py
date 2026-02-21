@@ -776,12 +776,25 @@ else:
             if 'aba_atual' not in st.session_state: st.session_state.aba_atual = "🏟️ Jogos"
             
             opcoes_menu = ["🏟️ Jogos", "📊 Consulta", "⚙️ Admin"]
-            idx_menu = opcoes_menu.index(st.session_state.aba_atual) if st.session_state.aba_atual in opcoes_menu else 0
+            # Menu Inteligente: Se for Amistoso, esconde a engrenagem de Admin
+            if fmt == "AMISTOSO":
+                opcoes_menu = ["🏟️ Jogos", "📊 Consulta"]
+            else:
+                opcoes_menu = ["🏟️ Jogos", "📊 Consulta", "⚙️ Admin"]
+
+            # Proteção: se a aba salva for Admin mas o menu mudou, volta para Jogos
+            if st.session_state.aba_atual not in opcoes_menu:
+                st.session_state.aba_atual = "🏟️ Jogos"
             
-            menu = st.radio("Menu", opcoes_menu, index=idx_menu)
-            st.session_state.aba_atual = menu # Atualiza a escolha naturalmente
+            idx_menu = opcoes_menu.index(st.session_state.aba_atual)
+            menu = st.radio("Menu", opcoes_menu, index=idx_menu, horizontal=True) # Horizontal fica mais moderno
+            st.session_state.aba_atual = menu
             
-            is_admin = (st.text_input("Senha Admin", type="password") == "1234")
+            # Lógica de Senha (só aparece se NÃO for Amistoso)
+            if fmt == "AMISTOSO":
+                is_admin = True
+            else:
+                is_admin = (st.text_input("Senha Admin", type="password") == "1234")
             if st.button("🏠 Voltar ao Menu Inicial"): 
                 st.session_state.torneio_ativo = None
                 st.rerun()
@@ -1293,6 +1306,38 @@ else:
                     with c1: st.markdown(f"""<div style="text-align: center; background-color: #C0C0C0; padding: 15px; border-radius: 10px; color: black; margin-top: 20px; border: 2px solid #808080;"><h3>🥈 Vice</h3><h3 style="margin:0;">{v}</h3></div>""", unsafe_allow_html=True)
                     with c3: st.markdown(f"""<div style="text-align: center; background-color: #CD7F32; padding: 15px; border-radius: 10px; color: black; margin-top: 20px; border: 2px solid #8B4513;"><h3>🥉 3º Lugar</h3><h3 style="margin:0;">{t}</h3></div>""", unsafe_allow_html=True)
                 st.divider()
+                if fmt == "AMISTOSO":
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("🏁 SALVAR AMISTOSO E VOLTAR À HOME", use_container_width=True, type="primary"):
+                        h_br = (datetime.utcnow() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
+                        jogo = df_t.iloc[0]
+                        
+                        # Monta o placar texto: "Time A 2 x 1 Time B"
+                        res_txt = f"{jogo['a']} {int(jogo['gols_a'])} x {int(jogo['gols_b'])} {jogo['b']}"
+                        
+                        # Adiciona os pênaltis se houver
+                        if int(jogo['pen_a']) > 0 or int(jogo['pen_b']) > 0:
+                            res_txt += f" (P: {int(jogo['pen_a'])}x{int(jogo['pen_b'])})"
+
+                        # Prepara a linha do histórico
+                        nova_h = pd.DataFrame([{
+                            'torneio_id': tid, 
+                            'formato': 'AMISTOSO', 
+                            'campeao': res_txt, 
+                            'vice': '---', 
+                            'terceiro': '---', 
+                            'data_fim': h_br
+                        }])
+                        
+                        # 1. Salva no Histórico
+                        salvar_dados(pd.concat([df_hist, nova_h], ignore_index=True), ABA_HISTORICO)
+                        
+                        # 2. Deleta dos jogos ativos para limpar o app
+                        salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
+                        
+                        st.session_state.torneio_ativo = None
+                        st.balloons()
+                        st.rerun()
 
             # --- Visualização de Jogos e Tabelas ---
             if fmt == "LIGA":
@@ -1440,6 +1485,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
