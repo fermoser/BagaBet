@@ -5,6 +5,7 @@ from streamlit_gsheets import GSheetsConnection
 from datetime import datetime, timedelta
 import random
 import io
+import json
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="BAGA GESTOR PRO", layout="wide")
@@ -123,22 +124,24 @@ def obter_vencedor_perdedor(r):
 # FUNÇÕES DO MODO SUÍÇO
 # ==========================================
 def save_to_sheets_suico():
-    if not SHEET_ENABLED or not st.session_state.teams: return
-    if not st.session_state.torneio_ativo: return
-
+    if not SHEET_ENABLED or not st.session_state.torneio_ativo: return
     try:
-        df_current = pd.DataFrame(st.session_state.teams)
-        df_current['tournament_name'] = st.session_state.torneio_ativo
-        
-        if 'received_bye' in df_current.columns:
-            df_current['received_bye'] = df_current['received_bye'].apply(
-                lambda x: "SIM" if str(x).upper() in ["TRUE", "SIM", "1"] else "NÃO"
-            )
-        df_current = df_current.astype(str)
+        # Cria o "Cartucho de Memória" (Save State) com todas as variáveis
+        pacote_memoria = {
+            'teams': st.session_state.teams,
+            'rounds': st.session_state.rounds,
+            'phase': st.session_state.phase,
+            'playoff_schedule': st.session_state.playoff_schedule,
+            'champion': st.session_state.champion,
+            'vice': st.session_state.vice,
+            'third': st.session_state.third
+        }
+        state_json = json.dumps(pacote_memoria)
+        df_current = pd.DataFrame([{'tournament_name': st.session_state.torneio_ativo, 'state_data': state_json}])
 
         try:
             existing_data = conn.read(worksheet=ABA_SUICO, ttl=0)
-            if existing_data is not None and not existing_data.empty:
+            if existing_data is not None and not existing_data.empty and 'tournament_name' in existing_data.columns:
                 other_tournaments = existing_data[existing_data['tournament_name'] != st.session_state.torneio_ativo]
                 df_final = pd.concat([other_tournaments, df_current], ignore_index=True)
             else:
@@ -150,6 +153,23 @@ def save_to_sheets_suico():
     except Exception as e:
         st.error(f"⚠️ Erro ao salvar Suíço: {e}")
 
+def load_from_sheets_suico(t_name):
+    if not SHEET_ENABLED: return False
+    try:
+        existing_data = conn.read(worksheet=ABA_SUICO, ttl=0)
+        if existing_data is not None and not existing_data.empty and 'tournament_name' in existing_data.columns:
+            t_data = existing_data[existing_data['tournament_name'] == t_name]
+            if not t_data.empty:
+                # Descompacta o cartucho de memória
+                state_json = t_data.iloc[0]['state_data']
+                pacote_memoria = json.loads(state_json)
+                for k, v in pacote_memoria.items():
+                    st.session_state[k] = v
+                return True
+    except Exception as e:
+        pass
+    return False
+    
 def get_sorted_rankings(teams, for_pairing=False):
     if for_pairing:
         teams = teams.copy()
@@ -521,6 +541,9 @@ if st.session_state.torneio_ativo is None:
             formato_salvo = df_db[df_db['torneio_id'] == t]['formato'].iloc[0]
             if cols[i%3].button(f"🏆 {t} ({formato_salvo})", key=f"t_{t}", use_container_width=True):
                 st.session_state.torneio_ativo = t
+                if formato_salvo == "SUÍÇO":
+                    for key in keys_suico: st.session_state[key] = keys_suico[key] # Zera a tela antes de injetar
+                    load_from_sheets_suico(t)
                 st.rerun()
 
     st.divider()
@@ -1250,6 +1273,7 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
