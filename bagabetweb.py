@@ -544,21 +544,53 @@ if st.session_state.torneio_ativo is None:
         st.subheader("🏆 Histórico de Competições")
         
         # Criamos abas para não misturar Amistoso com Torneio
-        tab_copas, tab_amis = st.tabs(["🏅 Copas e Ligas", "🤝 Amistosos"])
+        tab_copas, tab_amis, tab_ranking = st.tabs(["🏅 Copas e Ligas", "🤝 Amistosos", "🌟 Ranking Geral"])
         
         with tab_copas:
-            # Filtra tudo que NÃO é amistoso
             df_c = df_hist[df_hist['formato'] != 'AMISTOSO'].copy()
             if not df_c.empty:
-                # ADICIONAMOS 'torneio_id' na lista abaixo:
                 exibir_c = df_c[['torneio_id', 'campeao', 'vice', 'formato', 'data_fim']].sort_index(ascending=False)
-                
-                # ADICIONAMOS o título '📌 Torneio' no cabeçalho:
                 exibir_c.columns = ['📌 Torneio', '🏆 Campeão', '🥈 Vice', 'Formato', '📅 Data/Hora']
-                
                 st.dataframe(exibir_c, use_container_width=True, hide_index=True)
             else:
                 st.info("Nenhum torneio registrado.")
+
+        with tab_amis:
+            df_a = df_hist[df_hist['formato'] == 'AMISTOSO'].copy()
+            if not df_a.empty:
+                exibir_a = df_a[['torneio_id', 'campeao', 'data_fim']].sort_index(ascending=False)
+                exibir_a.columns = ['📌 Nome do Jogo', '⚽ Resultado', '📅 Data/Hora']
+                st.dataframe(exibir_a, use_container_width=True, hide_index=True)
+            else:
+                st.info("Nenhum amistoso registrado.")
+                
+        # --- A NOVA MÁGICA DO RANKING GERAL ---
+        with tab_ranking:
+            df_rank = df_hist[df_hist['formato'] != 'AMISTOSO'].copy()
+            
+            if not df_rank.empty:
+                # Conta quantas vezes cada nome aparece em cada posição
+                ouros = df_rank['campeao'].value_counts().rename('🥇 Ouro')
+                pratas = df_rank['vice'].value_counts().rename('🥈 Prata')
+                bronzes = df_rank['terceiro'].value_counts().rename('🥉 Bronze')
+                
+                # Junta tudo numa tabela só e troca valores vazios por ZERO
+                df_medalhas = pd.concat([ouros, pratas, bronzes], axis=1).fillna(0).astype(int)
+                
+                # Remove lixos (como empates vazios ou "---")
+                if "---" in df_medalhas.index: df_medalhas = df_medalhas.drop("---")
+                if "Empate" in df_medalhas.index: df_medalhas = df_medalhas.drop("Empate")
+                
+                # Cria a coluna de Total e ordena (Ouro desempata primeiro, depois Prata, depois Bronze)
+                df_medalhas['🏆 Total'] = df_medalhas['🥇 Ouro'] + df_medalhas['🥈 Prata'] + df_medalhas['🥉 Bronze']
+                df_medalhas = df_medalhas.sort_values(by=['🥇 Ouro', '🥈 Prata', '🥉 Bronze'], ascending=False)
+                
+                # Arruma o nome da primeira coluna
+                df_medalhas = df_medalhas.reset_index().rename(columns={'index': 'Clube / Player'})
+                
+                st.dataframe(df_medalhas, use_container_width=True, hide_index=True)
+            else:
+                st.info("Nenhum torneio finalizado para gerar o ranking.")
 
         with tab_amis:
             # Filtra apenas os AMISTOSOS
@@ -1496,6 +1528,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
