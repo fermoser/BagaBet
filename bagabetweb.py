@@ -35,7 +35,7 @@ ABA_HISTORICO = "Historico"
 ABA_SUICO = "suico"
 COLUNAS = ['torneio_id', 'formato', 'fase', 'a', 'b', 'finalizado', 'gols_a', 'gols_b', 'ida_a', 'ida_b', 'volta_a', 'volta_b', 'pen_a', 'pen_b', 'modo_copa']
 
-ORDEM_FASES = {"Oitavas": 1, "Quartas": 2, "Semifinal": 3, "3º Lugar": 4, "Final": 5, "Turno Único": 6, "Turno": 7, "Returno": 8, "Liga": 9}
+ORDEM_FASES = {"Oitavas": 1, "Quartas": 2, "Semifinal": 3, "3º Lugar": 4, "Final": 5, "Turno Único": 6, "Turno": 7, "Returno": 8, "Liga": 9, "Amistoso": 10}
 
 # --- TEXTO DO REGULAMENTO SUÍÇO ---
 REGULAMENTO_TXT = """
@@ -531,8 +531,20 @@ if st.session_state.torneio_ativo is None:
     st.title("⚽ BAGA GESTOR PRO")
     
     with st.expander("📜 HALL DA FAMA"):
-        if not df_hist.empty: st.dataframe(df_hist.sort_index(ascending=False), use_container_width=True)
-
+        if not df_hist.empty:
+        df_torneios = df_hist[df_hist['formato'] != 'AMISTOSO']
+        df_amistosos = df_hist[df_hist['formato'] == 'AMISTOSO']
+        
+        with st.expander("🏆 HALL DA FAMA - TORNEIOS"):
+            if not df_torneios.empty: st.dataframe(df_torneios.sort_index(ascending=False), use_container_width=True)
+            else: st.info("Nenhum torneio finalizado.")
+        
+        with st.expander("🤝 HISTÓRICO DE AMISTOSOS"):
+            if not df_amistosos.empty:
+                # Ocultamos a coluna 'terceiro' pois não faz sentido em amistoso
+                st.dataframe(df_amistosos.drop(columns=['terceiro'], errors='ignore').sort_index(ascending=False), use_container_width=True)
+            else: st.info("Nenhum amistoso finalizado.")
+                
     torneios = df_db['torneio_id'].unique() if not df_db.empty else []
     if len(torneios) > 0:
         st.subheader("📂 Abrir Torneio")
@@ -553,8 +565,8 @@ if st.session_state.torneio_ativo is None:
     
     st.markdown("##### 🎮 Escolha o Formato:")
     
-    # Criamos 3 colunas para os blocos (botões grandes com ícones)
-    c1, c2, c3 = st.columns(3)
+    # Criamos 4 colunas para os blocos (botões grandes com ícones)
+    c1, c2, c3, c4 = st.columns(4)
     
     with c1:
         if st.button("🏆\n\nMODO COPA", use_container_width=True, type="primary" if st.session_state.temp_fmt == "COPA" else "secondary"):
@@ -568,12 +580,16 @@ if st.session_state.torneio_ativo is None:
         if st.button("⚔️\n\nMODO SUÍÇO", use_container_width=True, type="primary" if st.session_state.temp_fmt == "SUÍÇO" else "secondary"):
             st.session_state.temp_fmt = "SUÍÇO"
             st.rerun()
+    with c4:
+        if st.button("🤝\n\nAMISTOSO", use_container_width=True, type="primary" if st.session_state.temp_fmt == "AMISTOSO" else "secondary"):
+            st.session_state.temp_fmt = "AMISTOSO"
+            st.rerun()
 
     # Linha final com o modo de disputa (Ida/Volta) e o Botão de Criar
     st.markdown("<br>", unsafe_allow_html=True)
     c_modo, c_btn = st.columns([1, 2])
     
-    opcoes_modo = ["Só Ida", "Ida e Volta"] if st.session_state.temp_fmt in ["COPA", "LIGA"] else ["Só Ida"]
+    opcoes_modo = ["Só Ida", "Ida e Volta"] if st.session_state.temp_fmt in ["COPA", "LIGA", "AMISTOSO"] else ["Só Ida"]
     with c_modo:
         m = st.selectbox("Modo de Disputa", opcoes_modo)
         
@@ -1078,7 +1094,7 @@ else:
                                     with st.expander("✎ Editar Jogo"):
                                         with st.form(f"f_{idx}"):
                                             # Garante o modo de disputa correto, mas força jogo único para Final e 3º Lugar
-                                            is_ida_volta = (fmt == "COPA" and modo_atual == "Ida e Volta" and r['fase'] not in ["Final", "3º Lugar"])
+                                            is_ida_volta = (fmt in ["COPA", "AMISTOSO"] and modo_atual == "Ida e Volta" and r['fase'] not in ["Final", "3º Lugar"])
                                             
                                             if is_ida_volta:
                                                 st.markdown("**⚽ JOGO DE IDA**")
@@ -1105,7 +1121,7 @@ else:
                                                 encerrar = True # Jogo único/Liga sempre encerra ao salvar
                                             
                                             pa, pb = 0, 0
-                                            if fmt == "COPA" and sa == sb and r['a'] != "BYE" and r['b'] != "BYE":
+                                            if fmt in ["COPA", "AMISTOSO"] and sa == sb and r['a'] != "BYE" and r['b'] != "BYE":
                                                 if is_ida_volta:
                                                     st.caption("🏆 Pênaltis (Preencha apenas no jogo de Volta se a soma empatar)")
                                                 else:
@@ -1120,7 +1136,7 @@ else:
                                                 status_fim = "SIM" if encerrar else "NÃO"
                                                 
                                                 # Bloqueio de erro: não deixa encerrar se empatar e não tiver vencedor nos pênaltis
-                                                if fmt == "COPA" and status_fim == "SIM" and sa == sb and pa == pb and r['a'] != "BYE" and r['b'] != "BYE":
+                                                if fmt in ["COPA", "AMISTOSO"] and status_fim == "SIM" and sa == sb and pa == pb and r['a'] != "BYE" and r['b'] != "BYE":
                                                     st.error("⚠️ Empate! Preencha o vencedor dos pênaltis antes de encerrar o confronto.")
                                                 else:
                                                     df_db.loc[idx, ['gols_a','gols_b','ida_a','ida_b','volta_a','volta_b','pen_a','pen_b','finalizado']] = res + [pa, pb, status_fim]
@@ -1168,6 +1184,9 @@ else:
                     t3 = df_t[df_t['fase'] == '3º Lugar']
                     if not fin.empty: c, v = obter_vencedor_perdedor(fin.iloc[0])
                     if not t3.empty: t, _ = obter_vencedor_perdedor(t3.iloc[0])
+                elif fmt == "AMISTOSO":
+                    ami = df_t[df_t['fase'] == 'Amistoso']
+                    if not ami.empty: c, v = obter_vencedor_perdedor(ami.iloc[0])
                 else: # LIGA
                     tm = pd.concat([df_t['a'], df_t['b']]).unique()
                     stt = {tmx: {'P':0,'V':0,'SG':0,'GP':0} for tmx in tm if pd.notna(tmx) and tmx != "BYE" and tmx != "Setup"}
@@ -1185,11 +1204,16 @@ else:
                     if len(res_l) >= 3: t = res_l[2]
                 
                 # Desenhando o Pódio
-                st.markdown(f"""<div style="text-align: center; padding: 10px;"><h2>🏆 PÓDIO FINAL 🏆</h2></div>""", unsafe_allow_html=True)
-                c1, c2, c3 = st.columns(3)
-                with c2: st.markdown(f"""<div style="text-align: center; background-color: #FFD700; padding: 15px; border-radius: 10px; color: black; border: 2px solid #B8860B;"><h2>🥇 CAMPEÃO</h2><h2 style="margin:0;">{c}</h2></div>""", unsafe_allow_html=True)
-                with c1: st.markdown(f"""<div style="text-align: center; background-color: #C0C0C0; padding: 15px; border-radius: 10px; color: black; margin-top: 20px; border: 2px solid #808080;"><h3>🥈 Vice</h3><h3 style="margin:0;">{v}</h3></div>""", unsafe_allow_html=True)
-                with c3: st.markdown(f"""<div style="text-align: center; background-color: #CD7F32; padding: 15px; border-radius: 10px; color: black; margin-top: 20px; border: 2px solid #8B4513;"><h3>🥉 3º Lugar</h3><h3 style="margin:0;">{t}</h3></div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div style="text-align: center; padding: 10px;"><h2>🏆 {'VENCEDOR' if fmt == 'AMISTOSO' else 'PÓDIO FINAL'} 🏆</h2></div>""", unsafe_allow_html=True)
+                if fmt == "AMISTOSO":
+                    c1, c2 = st.columns(2)
+                    with c1: st.markdown(f"""<div style="text-align: center; background-color: #28B463; padding: 15px; border-radius: 10px; color: white; border: 2px solid #1E8449;"><h2>✅ VENCEDOR</h2><h2 style="margin:0;">{c}</h2></div>""", unsafe_allow_html=True)
+                    with c2: st.markdown(f"""<div style="text-align: center; background-color: #E74C3C; padding: 15px; border-radius: 10px; color: white; border: 2px solid #B03A2E;"><h3>❌ Derrotado</h3><h3 style="margin:0;">{v}</h3></div>""", unsafe_allow_html=True)
+                else:
+                    c1, c2, c3 = st.columns(3)
+                    with c2: st.markdown(f"""<div style="text-align: center; background-color: #FFD700; padding: 15px; border-radius: 10px; color: black; border: 2px solid #B8860B;"><h2>🥇 CAMPEÃO</h2><h2 style="margin:0;">{c}</h2></div>""", unsafe_allow_html=True)
+                    with c1: st.markdown(f"""<div style="text-align: center; background-color: #C0C0C0; padding: 15px; border-radius: 10px; color: black; margin-top: 20px; border: 2px solid #808080;"><h3>🥈 Vice</h3><h3 style="margin:0;">{v}</h3></div>""", unsafe_allow_html=True)
+                    with c3: st.markdown(f"""<div style="text-align: center; background-color: #CD7F32; padding: 15px; border-radius: 10px; color: black; margin-top: 20px; border: 2px solid #8B4513;"><h3>🥉 3º Lugar</h3><h3 style="margin:0;">{t}</h3></div>""", unsafe_allow_html=True)
                 st.divider()
 
             # --- Visualização de Jogos e Tabelas ---
@@ -1212,7 +1236,7 @@ else:
             st.subheader("⚽ Resultados dos Jogos")
             
             # Listagem de jogos com visual em "Cards" Esportivos
-            f_p = ["Turno Único", "Turno", "Returno", "Liga", "Oitavas", "Quartas", "Semifinal", "3º Lugar", "Final"]
+            f_p = ["Turno Único", "Turno", "Returno", "Liga", "Oitavas", "Quartas", "Semifinal", "3º Lugar", "Final", "Amistoso"]
             for fn in f_p:
                 jogos_fase = df_t[df_t['fase'] == fn]
                 if not jogos_fase.empty:
@@ -1264,15 +1288,20 @@ else:
                             if modo_atual == "Ida e Volta":
                                 for a, b in combinations(times, 2):
                                     jogos.append({'torneio_id':tid,'formato':'LIGA','fase':'Returno','a':b,'b':a,'modo_copa':'Só Ida','finalizado':'NÃO'})
+                        elif fmt == "AMISTOSO":
+                            if len(times) == 2:
+                                jogos.append({'torneio_id':tid,'formato':'AMISTOSO','fase':'Amistoso','a':times[0],'b':times[1],'modo_copa':modo_atual,'finalizado':'NÃO'})
+                            else:
+                                st.error("⚠️ Para um Amistoso, digite exatamente 2 times.")
                         else:
                             f_ini = "Semifinal" if len(times)<=4 else "Quartas"
                             for i in range(0, len(times), 2):
                                 t1, t2 = times[i], (times[i+1] if i+1 < len(times) else "BYE")
-                                # Alterado para usar o modo_atual escolhido no menu
                                 jogos.append({'torneio_id':tid,'formato':'COPA','fase':f_ini,'a':t1,'b':t2,'modo_copa':modo_atual,'finalizado':'NÃO'})
                         
-                        df_db = df_db[~((df_db['torneio_id'] == tid) & (df_db['fase'] == 'Setup'))]
-                        salvar_dados(pd.concat([df_db, pd.DataFrame(jogos)], ignore_index=True), ABA_JOGOS); st.rerun()
+                        if jogos:
+                            df_db = df_db[~((df_db['torneio_id'] == tid) & (df_db['fase'] == 'Setup'))]
+                            salvar_dados(pd.concat([df_db, pd.DataFrame(jogos)], ignore_index=True), ABA_JOGOS); st.rerun()
             else:
                 if st.button("🏆 ENCERRAR (HALL DA FAMA)"):
                     h_br = (datetime.utcnow() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
@@ -1281,6 +1310,9 @@ else:
                         fin, t3 = df_t[df_t['fase'] == 'Final'], df_t[df_t['fase'] == '3º Lugar']
                         if not fin.empty: c, v = obter_vencedor_perdedor(fin.iloc[0])
                         if not t3.empty: t, _ = obter_vencedor_perdedor(t3.iloc[0])
+                    elif fmt == "AMISTOSO":
+                        ami = df_t[df_t['fase'] == 'Amistoso']
+                        if not ami.empty: c, v = obter_vencedor_perdedor(ami.iloc[0])
                     else:
                         tm = pd.concat([df_t['a'], df_t['b']]).unique()
                         stt = {tmx: {'P':0,'V':0,'SG':0,'GP':0} for tmx in tm if pd.notna(tmx) and tmx != "BYE"}
@@ -1308,6 +1340,7 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
