@@ -610,27 +610,59 @@ if st.session_state.torneio_ativo is None:
 
     # Linha final com o modo de disputa (Ida/Volta) e o Botão de Criar
     st.markdown("<br>", unsafe_allow_html=True)
-    c_modo, c_btn = st.columns([1, 2])
     
-    opcoes_modo = ["Só Ida", "Ida e Volta"] if st.session_state.temp_fmt in ["COPA", "LIGA", "AMISTOSO"] else ["Só Ida"]
-    with c_modo:
-        m = st.selectbox("Modo de Disputa", opcoes_modo)
+    # --- NOVA LÓGICA: SE FOR AMISTOSO, PEDE OS TIMES AQUI ---
+    if st.session_state.temp_fmt == "AMISTOSO":
+        st.subheader("🤝 Configuração de Amistoso")
+        txt_ami = st.text_area("Digite os dois times (um por linha)", placeholder="Time A\nTime B", height=110)
         
-    with c_btn:
-        st.markdown("<br>", unsafe_allow_html=True) # Espaçamento invisível para alinhar o botão com o selectbox
-        if st.button("✅ CONFIRMAR E CRIAR", type="primary", use_container_width=True):
-            if n: 
-                if st.session_state.temp_fmt == "SUÍÇO":
-                    for key in keys_suico: st.session_state[key] = keys_suico[key]
-                
-                novo_t = pd.DataFrame([{'torneio_id': n, 'formato': st.session_state.temp_fmt, 'fase': 'Setup', 'finalizado': 'NÃO', 'modo_copa': m}])
-                salvar_dados(pd.concat([df_db, novo_t], ignore_index=True), ABA_JOGOS)
-                
-                st.session_state.torneio_ativo = n
-                st.rerun()
-            else:
-                st.warning("⚠️ Por favor, digite um nome para o torneio!")
+        c_modo, c_btn = st.columns([1, 2])
+        with c_modo:
+            m = st.selectbox("Modo", ["Só Ida", "Ida e Volta"])
+        
+        with c_btn:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🚀 INICIAR AMISTOSO AGORA", type="primary", use_container_width=True):
+                times = [x.strip() for x in txt_ami.split('\n') if x.strip()]
+                if len(times) == 2:
+                    # Cria um ID automático baseado na hora para não precisar digitar nome de torneio
+                    tid_ami = f"AMI-{datetime.now().strftime('%H%M%S')}"
+                    
+                    novo_jogo = {
+                        'torneio_id': tid_ami, 
+                        'formato': 'AMISTOSO', 
+                        'fase': 'Amistoso', 
+                        'a': times[0], 'b': times[1], 
+                        'finalizado': 'NÃO', 'modo_copa': m
+                    }
+                    
+                    salvar_dados(pd.concat([df_db, pd.DataFrame([novo_jogo])], ignore_index=True), ABA_JOGOS)
+                    st.session_state.torneio_ativo = tid_ami
+                    st.rerun()
+                else:
+                    st.error("⚠️ Para amistoso, digite exatamente 2 times.")
 
+    else:
+        # --- LÓGICA NORMAL PARA COPA, LIGA E SUÍÇO ---
+        c_modo, c_btn = st.columns([1, 2])
+        opcoes_modo = ["Só Ida", "Ida e Volta"] if st.session_state.temp_fmt in ["COPA", "LIGA"] else ["Só Ida"]
+        
+        with c_modo:
+            m = st.selectbox("Modo de Disputa", opcoes_modo)
+            
+        with c_btn:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("✅ CONFIRMAR E CRIAR", type="primary", use_container_width=True):
+                if n: # 'n' é a variável do nome do torneio que você já tem no código
+                    if st.session_state.temp_fmt == "SUÍÇO":
+                        for key in keys_suico: st.session_state[key] = keys_suico[key]
+                    
+                    novo_t = pd.DataFrame([{'torneio_id': n, 'formato': st.session_state.temp_fmt, 'fase': 'Setup', 'finalizado': 'NÃO', 'modo_copa': m}])
+                    salvar_dados(pd.concat([df_db, novo_t], ignore_index=True), ABA_JOGOS)
+                    st.session_state.torneio_ativo = n
+                    st.rerun()
+                else:
+                    st.warning("⚠️ Por favor, digite um nome para o torneio!")
 else:
     tid = st.session_state.torneio_ativo
     df_t = df_db[df_db['torneio_id'] == tid].copy()
@@ -1408,6 +1440,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
