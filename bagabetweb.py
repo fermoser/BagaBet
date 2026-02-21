@@ -530,20 +530,22 @@ df_hist = carregar_dados(ABA_HISTORICO)
 if st.session_state.torneio_ativo is None:
     st.title("⚽ BAGA GESTOR PRO")
     
-    with st.expander("📜 HALL DA FAMA"):
-        if not df_hist.empty:
+    if not df_hist.empty:
         df_torneios = df_hist[df_hist['formato'] != 'AMISTOSO']
         df_amistosos = df_hist[df_hist['formato'] == 'AMISTOSO']
         
         with st.expander("🏆 HALL DA FAMA - TORNEIOS"):
-            if not df_torneios.empty: st.dataframe(df_torneios.sort_index(ascending=False), use_container_width=True)
-            else: st.info("Nenhum torneio finalizado.")
+            if not df_torneios.empty:
+                st.dataframe(df_torneios.sort_index(ascending=False), use_container_width=True)
+            else:
+                st.info("Nenhum torneio finalizado.")
         
         with st.expander("🤝 HISTÓRICO DE AMISTOSOS"):
             if not df_amistosos.empty:
                 # Ocultamos a coluna 'terceiro' pois não faz sentido em amistoso
                 st.dataframe(df_amistosos.drop(columns=['terceiro'], errors='ignore').sort_index(ascending=False), use_container_width=True)
-            else: st.info("Nenhum amistoso finalizado.")
+            else:
+                st.info("Nenhum amistoso finalizado.")
                 
     torneios = df_db['torneio_id'].unique() if not df_db.empty else []
     if len(torneios) > 0:
@@ -1340,6 +1342,7 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
