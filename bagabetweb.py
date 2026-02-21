@@ -1277,35 +1277,48 @@ else:
                             """, unsafe_allow_html=True)
 
         elif menu == "⚙️ Admin" and is_admin:
-            if len(df_t) <= 1:
+            # Nova lógica: Se a única fase existente for 'Setup', ele mostra a criação.
+            # Se já houver 'Amistoso', 'Oitavas', 'Liga', etc, ele mostra o encerramento.
+            fases_reais = [f for f in df_t['fase'].unique() if f != 'Setup']
+            
+            if not fases_reais:
+                st.subheader("🛠️ Configuração de Partidas")
                 txt = st.text_area("Times (um por linha)")
-                if st.button("GERAR"):
+                if st.button("GERAR JOGOS", use_container_width=True, type="primary"):
                     times = [x.strip() for x in txt.split('\n') if x.strip()]
-                    if len(times)>=2:
-                        jogos = []
-                        if fmt == "LIGA":
-                            nome_fase = "Turno Único" if modo_atual == "Só Ida" else "Turno"
-                            for a, b in combinations(times, 2): 
-                                jogos.append({'torneio_id':tid,'formato':'LIGA','fase':nome_fase,'a':a,'b':b,'modo_copa':'Só Ida','finalizado':'NÃO'})
-                            if modo_atual == "Ida e Volta":
-                                for a, b in combinations(times, 2):
-                                    jogos.append({'torneio_id':tid,'formato':'LIGA','fase':'Returno','a':b,'b':a,'modo_copa':'Só Ida','finalizado':'NÃO'})
-                        elif fmt == "AMISTOSO":
-                            if len(times) == 2:
-                                jogos.append({'torneio_id':tid,'formato':'AMISTOSO','fase':'Amistoso','a':times[0],'b':times[1],'modo_copa':modo_atual,'finalizado':'NÃO'})
-                            else:
-                                st.error("⚠️ Para um Amistoso, digite exatamente 2 times.")
+                    jogos = []
+                    
+                    if fmt == "AMISTOSO":
+                        if len(times) == 2:
+                            jogos.append({'torneio_id': tid, 'formato': 'AMISTOSO', 'fase': 'Amistoso', 'a': times[0], 'b': times[1], 'modo_copa': modo_atual, 'finalizado': 'NÃO'})
                         else:
-                            f_ini = "Semifinal" if len(times)<=4 else "Quartas"
-                            for i in range(0, len(times), 2):
-                                t1, t2 = times[i], (times[i+1] if i+1 < len(times) else "BYE")
-                                jogos.append({'torneio_id':tid,'formato':'COPA','fase':f_ini,'a':t1,'b':t2,'modo_copa':modo_atual,'finalizado':'NÃO'})
-                        
-                        if jogos:
-                            df_db = df_db[~((df_db['torneio_id'] == tid) & (df_db['fase'] == 'Setup'))]
-                            salvar_dados(pd.concat([df_db, pd.DataFrame(jogos)], ignore_index=True), ABA_JOGOS); st.rerun()
+                            st.error("⚠️ Para um Amistoso, digite exatamente 2 times.")
+                    
+                    elif fmt == "LIGA":
+                        nome_fase = "Turno Único" if modo_atual == "Só Ida" else "Turno"
+                        for a, b in combinations(times, 2): 
+                            jogos.append({'torneio_id':tid,'formato':'LIGA','fase':nome_fase,'a':a,'b':b,'modo_copa':'Só Ida','finalizado':'NÃO'})
+                        if modo_atual == "Ida e Volta":
+                            for a, b in combinations(times, 2):
+                                jogos.append({'torneio_id':tid,'formato':'LIGA','fase':'Returno','a':b,'b':a,'modo_copa':'Só Ida','finalizado':'NÃO'})
+                    
+                    else: # COPA
+                        f_ini = "Semifinal" if len(times)<=4 else "Quartas"
+                        for i in range(0, len(times), 2):
+                            t1, t2 = times[i], (times[i+1] if i+1 < len(times) else "BYE")
+                            jogos.append({'torneio_id':tid,'formato':'COPA','fase':f_ini,'a':t1,'b':t2,'modo_copa':modo_atual,'finalizado':'NÃO'})
+                    
+                    if jogos:
+                        # Remove a linha de Setup e adiciona os jogos reais
+                        df_db = df_db[~((df_db['torneio_id'] == tid) & (df_db['fase'] == 'Setup'))]
+                        salvar_dados(pd.concat([df_db, pd.DataFrame(jogos)], ignore_index=True), ABA_JOGOS)
+                        st.success("✅ Jogos gerados com sucesso!")
+                        st.rerun()
             else:
-                if st.button("🏆 ENCERRAR (HALL DA FAMA)", use_container_width=True, type="primary"):
+                st.subheader("🏆 Finalização do Torneio")
+                st.info("Certifique-se de que todos os placares foram preenchidos na aba 'Jogos' antes de encerrar.")
+                
+                if st.button("🏆 ENCERRAR E SALVAR NO HISTÓRICO", use_container_width=True, type="primary"):
                     h_br = (datetime.utcnow() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
                     c, v, t = "---", "---", "---"
                     
@@ -1315,7 +1328,6 @@ else:
                         if not t3.empty: t, _ = obter_vencedor_perdedor(t3.iloc[0])
                     
                     elif fmt == "AMISTOSO":
-                        # No Amistoso, pegamos o resultado da fase única
                         ami = df_t[df_t['fase'] == 'Amistoso']
                         if not ami.empty:
                             c, v = obter_vencedor_perdedor(ami.iloc[0])
@@ -1336,25 +1348,23 @@ else:
                         if len(res_l) >= 2: v = res_l[1]
                         if len(res_l) >= 3: t = res_l[2]
                     
-                    # Salva no Histórico Geral marcando o formato correto
+                    # Salva no Histórico
                     nova_h = pd.DataFrame([{
-                        'torneio_id': tid,
-                        'formato': fmt,
-                        'campeao': c if c else "Empate",
-                        'vice': v if v else "Empate",
-                        'terceiro': t,
-                        'data_fim': h_br
+                        'torneio_id': tid, 'formato': fmt, 'campeao': c if c else "Empate",
+                        'vice': v if v else "Empate", 'terceiro': t, 'data_fim': h_br
                     }])
                     
                     salvar_dados(pd.concat([df_hist, nova_h], ignore_index=True), ABA_HISTORICO)
-                    
-                    st.success("✅ Amistoso salvo com sucesso!")
+                    st.success("✅ Gravado no Hall da Fama!")
                     st.session_state.mostrar_baloes = True
                     st.session_state.aba_atual = "📊 Consulta" 
                     st.rerun()
-                
+
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
-                    salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+                    salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
+                    st.session_state.torneio_ativo = None
+                    st.rerun()
+
 
 
 
