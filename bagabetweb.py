@@ -615,7 +615,7 @@ if st.session_state.torneio_ativo is None:
     st.markdown("<br>", unsafe_allow_html=True)
     
     # --- NOVA LÓGICA: SE FOR AMISTOSO, PEDE OS TIMES AQUI ---
-   if st.session_state.temp_fmt == "AMISTOSO":
+    if st.session_state.temp_fmt == "AMISTOSO":
         st.subheader("🤝 Configuração de Amistoso")
         
         # ADICIONADO: Campo para você dar nome ao jogo
@@ -1493,6 +1493,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
