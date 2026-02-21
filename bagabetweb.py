@@ -99,8 +99,16 @@ def carregar_dados(aba):
     except: return pd.DataFrame(columns=COLUNAS)
 
 def salvar_dados(df, aba):
+    # 1. Remove linhas realmente vazias
     df = df.dropna(subset=['torneio_id'])
+    
+    # 2. Transforma qualquer erro de valor nulo em texto vazio (evita o erro do Sheets)
+    df = df.fillna("")
+    
+    # 3. Envia para o Google
     conn.update(worksheet=aba, data=df)
+    
+    # 4. Limpa o cache para o app ler o dado novo na hora
     st.cache_data.clear()
 
 def is_done(val): return str(val).upper().strip() in ["1", "SIM", "TRUE"]
@@ -1167,7 +1175,41 @@ else:
                                                         st.session_state.mostrar_baloes = True
                                                     
                                                     salvar_dados(df_db, ABA_JOGOS); st.rerun()
+                if fmt == "AMISTOSO":
+                st.divider()
+                if st.button("🏁 ENCERRAR AMISTOSO E SALVAR NO HISTÓRICO", use_container_width=True, type="primary"):
+                    jogo = df_t[df_t['fase'] == 'Amistoso'].iloc[0]
+                    
+                    if is_done(jogo['finalizado']):
+                        h_br = (datetime.utcnow() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
+                        
+                        # Monta o placar: "Time A 2 x 1 Time B"
+                        res_a = int(jogo['gols_a'])
+                        res_b = int(jogo['gols_b'])
+                        placar_final = f"{jogo['a']} {res_a} x {res_b} {jogo['b']}"
+                        
+                        # Se teve pênaltis, adiciona ao texto
+                        if int(jogo['pen_a']) > 0 or int(jogo['pen_b']) > 0:
+                            placar_final += f" (P: {int(jogo['pen_a'])}x{int(jogo['pen_b'])})"
 
+                        nova_h = pd.DataFrame([{
+                            'torneio_id': tid,
+                            'formato': 'AMISTOSO',
+                            'campeao': placar_final, 
+                            'vice': '---',
+                            'terceiro': '---',
+                            'data_fim': h_br
+                        }])
+                        
+                        salvar_dados(pd.concat([df_hist, nova_h], ignore_index=True), ABA_HISTORICO)
+                        salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
+                        
+                        st.success("✅ Amistoso gravado no Histórico!")
+                        st.balloons()
+                        st.session_state.torneio_ativo = None
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Salve o placar no botão 'Salvar' antes de encerrar.")
         elif menu == "📊 Consulta":
             st.title("📊 Painel de Consulta")
             
@@ -1364,6 +1406,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
