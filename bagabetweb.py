@@ -1196,20 +1196,15 @@ else:
                             jogo = jogo_list.iloc[0]
                             if is_done(jogo['finalizado']):
                                 h_br = (datetime.utcnow() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
-                                
-                                # Placar formatado
                                 placar_final = f"{jogo['a']} {int(jogo['gols_a'])} x {int(jogo['gols_b'])} {jogo['b']}"
                                 if int(jogo['pen_a']) > 0 or int(jogo['pen_b']) > 0:
                                     placar_final += f" (P: {int(jogo['pen_a'])}x{int(jogo['pen_b'])})"
-
                                 nova_h = pd.DataFrame([{
                                     'torneio_id': tid, 'formato': 'AMISTOSO',
                                     'campeao': placar_final, 'vice': '---', 'terceiro': '---', 'data_fim': h_br
                                 }])
-                                
                                 salvar_dados(pd.concat([df_hist, nova_h], ignore_index=True), ABA_HISTORICO)
                                 salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
-                                
                                 st.success("✅ Amistoso gravado!")
                                 st.balloons()
                                 st.session_state.torneio_ativo = None
@@ -1413,6 +1408,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
