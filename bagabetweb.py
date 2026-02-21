@@ -1305,17 +1305,22 @@ else:
                             df_db = df_db[~((df_db['torneio_id'] == tid) & (df_db['fase'] == 'Setup'))]
                             salvar_dados(pd.concat([df_db, pd.DataFrame(jogos)], ignore_index=True), ABA_JOGOS); st.rerun()
             else:
-                if st.button("🏆 ENCERRAR (HALL DA FAMA)"):
+                if st.button("🏆 ENCERRAR (HALL DA FAMA)", use_container_width=True, type="primary"):
                     h_br = (datetime.utcnow() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
                     c, v, t = "---", "---", "---"
+                    
                     if fmt == "COPA":
                         fin, t3 = df_t[df_t['fase'] == 'Final'], df_t[df_t['fase'] == '3º Lugar']
                         if not fin.empty: c, v = obter_vencedor_perdedor(fin.iloc[0])
                         if not t3.empty: t, _ = obter_vencedor_perdedor(t3.iloc[0])
+                    
                     elif fmt == "AMISTOSO":
+                        # No Amistoso, pegamos o resultado da fase única
                         ami = df_t[df_t['fase'] == 'Amistoso']
-                        if not ami.empty: c, v = obter_vencedor_perdedor(ami.iloc[0])
-                    else:
+                        if not ami.empty:
+                            c, v = obter_vencedor_perdedor(ami.iloc[0])
+                    
+                    else: # LIGA
                         tm = pd.concat([df_t['a'], df_t['b']]).unique()
                         stt = {tmx: {'P':0,'V':0,'SG':0,'GP':0} for tmx in tm if pd.notna(tmx) and tmx != "BYE"}
                         for _, r in df_t[df_t['finalizado'] == 'SIM'].iterrows():
@@ -1331,17 +1336,26 @@ else:
                         if len(res_l) >= 2: v = res_l[1]
                         if len(res_l) >= 3: t = res_l[2]
                     
-                    nova_h = pd.DataFrame([{'torneio_id':tid,'formato':fmt,'campeao':c,'vice':v,'terceiro':t,'data_fim':h_br}])
+                    # Salva no Histórico Geral marcando o formato correto
+                    nova_h = pd.DataFrame([{
+                        'torneio_id': tid,
+                        'formato': fmt,
+                        'campeao': c if c else "Empate",
+                        'vice': v if v else "Empate",
+                        'terceiro': t,
+                        'data_fim': h_br
+                    }])
+                    
                     salvar_dados(pd.concat([df_hist, nova_h], ignore_index=True), ABA_HISTORICO)
                     
-                    # Exclusão removida! O torneio continua salvo no banco de dados.
-                    # Pula direto para a aba de Consulta para você ver o pódio final!
+                    st.success("✅ Amistoso salvo com sucesso!")
                     st.session_state.mostrar_baloes = True
                     st.session_state.aba_atual = "📊 Consulta" 
                     st.rerun()
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
