@@ -564,9 +564,12 @@ if st.session_state.torneio_ativo is None:
             # Filtra apenas os AMISTOSOS
             df_a = df_hist[df_hist['formato'] == 'AMISTOSO'].copy()
             if not df_a.empty:
-                # Aqui a mágica: Mostra apenas o Resultado (guardado na coluna campeao) e a Data
-                exibir_a = df_a[['campeao', 'data_fim']].sort_index(ascending=False)
-                exibir_a.columns = ['⚽ Resultado do Amistoso', '📅 Data/Hora']
+                # ADICIONADO: 'torneio_id' para mostrar o nome que você deu
+                exibir_a = df_a[['torneio_id', 'campeao', 'data_fim']].sort_index(ascending=False)
+                
+                # Renomeando as colunas para o histórico de Amistosos
+                exibir_a.columns = ['📌 Nome do Jogo', '⚽ Resultado', '📅 Data/Hora']
+                
                 st.dataframe(exibir_a, use_container_width=True, hide_index=True)
             else:
                 st.info("Nenhum amistoso registrado.")
@@ -1493,6 +1496,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
