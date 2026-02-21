@@ -654,6 +654,41 @@ else:
                 """
                 st.markdown(table_html, unsafe_allow_html=True)
                 st.caption("GP: Pró | GC: Contra | SG: Saldo | (F): Folga na rodada")
+
+            # --- NOVO BLOCO: HISTÓRICO DE TODOS OS JOGOS ---
+            st.markdown("---")
+            st.header("📜 Histórico de Jogos")
+            if st.session_state.rounds or st.session_state.playoff_schedule:
+                with st.expander("Ver todas as partidas", expanded=False):
+                    # Histórico da Fase Suíça
+                    if st.session_state.rounds:
+                        st.markdown("#### 📌 Fase Suíça")
+                        for i, r_data in enumerate(st.session_state.rounds):
+                            if r_data.get('completed'):
+                                st.markdown(f"**Rodada {i+1}**")
+                                if r_data.get('bye'):
+                                    st.write(f"🎉 *Folga: {r_data['bye']['name']}*")
+                                for m in r_data['matches']:
+                                    h_name = next((t['name'] for t in st.session_state.teams if t['id'] == m['home']), "Time A")
+                                    a_name = next((t['name'] for t in st.session_state.teams if t['id'] == m['away']), "Time B")
+                                    pen_txt = f" (P: {m['h_pen']}x{m['a_pen']})" if 'h_pen' in m and m['h_pen'] is not None and (m['h_pen'] > 0 or m['a_pen'] > 0) else ""
+                                    st.write(f"⚽ {h_name} **{m['home_score']} x {m['away_score']}** {a_name}{pen_txt}")
+                                st.divider()
+                    
+                    # Histórico do Mata-Mata
+                    if st.session_state.playoff_schedule:
+                        st.markdown("#### 🔥 Fase Final")
+                        for r_data in st.session_state.playoff_schedule:
+                            if r_data.get('completed'):
+                                st.markdown(f"**{r_data['name']}**")
+                                for m in r_data['matches']:
+                                    h_name = m['home']['name']
+                                    a_name = m['away']['name']
+                                    pen_txt = f" (P: {m['h_pen']}x{m['a_pen']})" if m.get('is_penalties') else ""
+                                    st.write(f"⚽ {h_name} **{m['h_goals']} x {m['a_goals']}** {a_name}{pen_txt}")
+                                st.divider()
+            else:
+                st.info("Nenhum jogo finalizado ainda.")
             
             st.markdown("---")
             st.header("💾 Exportar Dados")
@@ -1273,6 +1308,7 @@ else:
                 
                 if st.button("🚨 EXCLUIR TORNEIO (SEM SALVAR)"):
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS); st.session_state.torneio_ativo = None; st.rerun()
+
 
 
 
