@@ -615,8 +615,12 @@ if st.session_state.torneio_ativo is None:
     st.markdown("<br>", unsafe_allow_html=True)
     
     # --- NOVA LÓGICA: SE FOR AMISTOSO, PEDE OS TIMES AQUI ---
-    if st.session_state.temp_fmt == "AMISTOSO":
+   if st.session_state.temp_fmt == "AMISTOSO":
         st.subheader("🤝 Configuração de Amistoso")
+        
+        # ADICIONADO: Campo para você dar nome ao jogo
+        nome_ami = st.text_input("Nome do Amistoso (Ex: Jogo da Galera, Amistoso de Sábado)", placeholder="Digite um nome...")
+        
         txt_ami = st.text_area("Digite os dois times (um por linha)", placeholder="Time A\nTime B", height=110)
         
         c_modo, c_btn = st.columns([1, 2])
@@ -627,12 +631,13 @@ if st.session_state.torneio_ativo is None:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🚀 INICIAR AMISTOSO AGORA", type="primary", use_container_width=True):
                 times = [x.strip() for x in txt_ami.split('\n') if x.strip()]
-                if len(times) == 2:
-                    # Cria um ID automático baseado na hora para não precisar digitar nome de torneio
-                    tid_ami = f"AMI-{datetime.now().strftime('%H%M%S')}"
-                    
+                
+                if not nome_ami:
+                    st.error("⚠️ Por favor, dê um nome para o Amistoso!")
+                elif len(times) == 2:
+                    # Agora o ID é o nome que você digitou
                     novo_jogo = {
-                        'torneio_id': tid_ami, 
+                        'torneio_id': nome_ami, 
                         'formato': 'AMISTOSO', 
                         'fase': 'Amistoso', 
                         'a': times[0], 'b': times[1], 
@@ -640,7 +645,7 @@ if st.session_state.torneio_ativo is None:
                     }
                     
                     salvar_dados(pd.concat([df_db, pd.DataFrame([novo_jogo])], ignore_index=True), ABA_JOGOS)
-                    st.session_state.torneio_ativo = tid_ami
+                    st.session_state.torneio_ativo = nome_ami
                     st.rerun()
                 else:
                     st.error("⚠️ Para amistoso, digite exatamente 2 times.")
@@ -1488,6 +1493,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
