@@ -550,9 +550,12 @@ if st.session_state.torneio_ativo is None:
             # Filtra tudo que NÃO é amistoso
             df_c = df_hist[df_hist['formato'] != 'AMISTOSO'].copy()
             if not df_c.empty:
-                # Mostra colunas padrão de torneio
-                exibir_c = df_c[['campeao', 'vice', 'formato', 'data_fim']].sort_index(ascending=False)
-                exibir_c.columns = ['🏆 Campeão', '🥈 Vice', 'Formato', '📅 Data/Hora']
+                # ADICIONAMOS 'torneio_id' na lista abaixo:
+                exibir_c = df_c[['torneio_id', 'campeao', 'vice', 'formato', 'data_fim']].sort_index(ascending=False)
+                
+                # ADICIONAMOS o título '📌 Torneio' no cabeçalho:
+                exibir_c.columns = ['📌 Torneio', '🏆 Campeão', '🥈 Vice', 'Formato', '📅 Data/Hora']
+                
                 st.dataframe(exibir_c, use_container_width=True, hide_index=True)
             else:
                 st.info("Nenhum torneio registrado.")
@@ -1485,6 +1488,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
