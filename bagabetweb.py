@@ -596,7 +596,6 @@ if st.session_state.torneio_ativo is None:
                # --- TABELA DE RANKING DE AMISTOSOS (COM APROVEITAMENTO) ---
             with rank_a:
                 df_rank_ami = df_hist[df_hist['formato'] == 'AMISTOSO'].copy()
-                # Ignora os jogos bem antigos para não dar erro
                 df_rank_ami = df_rank_ami[~df_rank_ami['campeao'].str.contains(' x ', na=False)]
                 
                 if not df_rank_ami.empty:
@@ -637,13 +636,11 @@ if st.session_state.torneio_ativo is None:
                     for jg, data in stats_ami.items():
                         data['📊 SG'] = data['⚽ GP'] - data['🥅 GC']
                         
-                        # Calcula os Pontos e o Aproveitamento (100%)
+                        # Calcula o Aproveitamento MAS DEIXA COMO NÚMERO PARA ORDENAR
                         pts_ganhos = (data['✅ Vitórias'] * 3) + (data['🤝 Empates'] * 1)
                         pts_possiveis = data['⚔️ Jogos'] * 3
-                        aproveitamento = (pts_ganhos / pts_possiveis * 100) if pts_possiveis > 0 else 0
-                        data['📈 Aprov.'] = f"{aproveitamento:.1f}%" 
+                        data['📈 Aprov.'] = (pts_ganhos / pts_possiveis * 100) if pts_possiveis > 0 else 0
                         
-                        # Acha o maior freguês
                         if data['fregueses']:
                             fregues = pd.Series(data['fregueses']).mode()[0]
                             qtd = data['fregueses'].count(fregues)
@@ -656,10 +653,12 @@ if st.session_state.torneio_ativo is None:
                     df_ami_stats = pd.DataFrame.from_dict(stats_ami, orient='index')
                     
                     if not df_ami_stats.empty:
-                        # Ordena: Maior %, depois Vitórias, depois Saldo
+                        # 1. ORDENA COMO NÚMERO (100 agora ganha de 66)
                         df_ami_stats = df_ami_stats.sort_values(by=['📈 Aprov.', '✅ Vitórias', '📊 SG'], ascending=[False, False, False]).reset_index().rename(columns={'index': 'Clube / Player'})
                         
-                        # Colunas que vão aparecer
+                        # 2. COLOCA O SÍMBOLO DE % DEPOIS DE ORDENAR
+                        df_ami_stats['📈 Aprov.'] = df_ami_stats['📈 Aprov.'].apply(lambda x: f"{x:.1f}%")
+                        
                         df_ami_stats = df_ami_stats[['Clube / Player', '⚔️ Jogos', '✅ Vitórias', '🤝 Empates', '❌ Derrotas', '📈 Aprov.', '⚽ GP', '🥅 GC', '📊 SG', '🫂 Maior Freguês']]
                         
                         st.dataframe(df_ami_stats, use_container_width=True, hide_index=True)
@@ -1600,6 +1599,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
