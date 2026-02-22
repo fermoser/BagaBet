@@ -593,7 +593,78 @@ if st.session_state.torneio_ativo is None:
                     st.dataframe(df_medalhas, use_container_width=True, hide_index=True)
                 else:
                     st.info("Nenhum torneio finalizado.")
+               # --- TABELA DE RANKING DE AMISTOSOS (COM APROVEITAMENTO) ---
+            with rank_a:
+                df_rank_ami = df_hist[df_hist['formato'] == 'AMISTOSO'].copy()
+                # Ignora os jogos bem antigos para não dar erro
+                df_rank_ami = df_rank_ami[~df_rank_ami['campeao'].str.contains(' x ', na=False)]
+                
+                if not df_rank_ami.empty:
+                    jogadores = set(df_rank_ami['campeao'].dropna().unique()) | set(df_rank_ami['vice'].dropna().unique())
+                    if "Empate" in jogadores: jogadores.remove("Empate")
+                    if "---" in jogadores: jogadores.remove("---")
                     
+                    stats_ami = {jg: {'⚔️ Jogos':0, '✅ Vitórias':0, '🤝 Empates':0, '❌ Derrotas':0, '⚽ GP':0, '🥅 GC':0, 'fregueses': []} for jg in jogadores}
+                    
+                    for _, r in df_rank_ami.iterrows():
+                        c, v = r.get('campeao', '---'), r.get('vice', '---')
+                        if c == "Empate" or c == "---": continue 
+                        
+                        gc = int(r['gols_campeao']) if 'gols_campeao' in r and pd.notna(r['gols_campeao']) and str(r['gols_campeao']).strip() != "" else 0
+                        gv = int(r['gols_vice']) if 'gols_vice' in r and pd.notna(r['gols_vice']) and str(r['gols_vice']).strip() != "" else 0
+                        
+                        is_empate = (gc == gv) 
+                        
+                        if c in stats_ami:
+                            stats_ami[c]['⚔️ Jogos'] += 1
+                            stats_ami[c]['⚽ GP'] += gc
+                            stats_ami[c]['🥅 GC'] += gv
+                            if is_empate:
+                                stats_ami[c]['🤝 Empates'] += 1
+                            else:
+                                stats_ami[c]['✅ Vitórias'] += 1
+                                if v != "---": stats_ami[c]['fregueses'].append(v)
+                                
+                        if v in stats_ami:
+                            stats_ami[v]['⚔️ Jogos'] += 1
+                            stats_ami[v]['⚽ GP'] += gv
+                            stats_ami[v]['🥅 GC'] += gc
+                            if is_empate:
+                                stats_ami[v]['🤝 Empates'] += 1
+                            else:
+                                stats_ami[v]['❌ Derrotas'] += 1
+                            
+                    for jg, data in stats_ami.items():
+                        data['📊 SG'] = data['⚽ GP'] - data['🥅 GC']
+                        
+                        # Calcula os Pontos e o Aproveitamento (100%)
+                        pts_ganhos = (data['✅ Vitórias'] * 3) + (data['🤝 Empates'] * 1)
+                        pts_possiveis = data['⚔️ Jogos'] * 3
+                        aproveitamento = (pts_ganhos / pts_possiveis * 100) if pts_possiveis > 0 else 0
+                        data['📈 Aprov.'] = f"{aproveitamento:.1f}%" 
+                        
+                        # Acha o maior freguês
+                        if data['fregueses']:
+                            fregues = pd.Series(data['fregueses']).mode()[0]
+                            qtd = data['fregueses'].count(fregues)
+                            data['🫂 Maior Freguês'] = f"{fregues} ({qtd}x)"
+                        else:
+                            data['🫂 Maior Freguês'] = "---"
+                            
+                        del data['fregueses']
+                        
+                    df_ami_stats = pd.DataFrame.from_dict(stats_ami, orient='index')
+                    
+                    if not df_ami_stats.empty:
+                        # Ordena: Maior %, depois Vitórias, depois Saldo
+                        df_ami_stats = df_ami_stats.sort_values(by=['📈 Aprov.', '✅ Vitórias', '📊 SG'], ascending=[False, False, False]).reset_index().rename(columns={'index': 'Clube / Player'})
+                        
+                        # Colunas que vão aparecer
+                        df_ami_stats = df_ami_stats[['Clube / Player', '⚔️ Jogos', '✅ Vitórias', '🤝 Empates', '❌ Derrotas', '📈 Aprov.', '⚽ GP', '🥅 GC', '📊 SG', '🫂 Maior Freguês']]
+                        
+                        st.dataframe(df_ami_stats, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Jogue novos amistosos para gerar o ranking detalhado!")     
            
                 
     torneios = df_db['torneio_id'].unique() if not df_db.empty else []
@@ -1529,6 +1600,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
