@@ -1423,14 +1423,13 @@ else:
                         
                         campeao_ami, vice_ami = obter_vencedor_perdedor(j)
                         
-                        # NOVA LÓGICA: Se der empate, preservamos os nomes dos times para o ranking!
+                        # NOVA LÓGICA: Se der empate, preservamos os nomes dos times
                         if not campeao_ami: 
                             campeao_ami = j['a']
                             vice_ami = j['b']
                             g_camp = int(j['gols_a'])
                             g_vice = int(j['gols_b'])
                         else:
-                            # Se teve vencedor, salva normal
                             g_camp = int(j['gols_a']) if campeao_ami == j['a'] else int(j['gols_b'])
                             g_vice = int(j['gols_b']) if campeao_ami == j['a'] else int(j['gols_a'])
                             
@@ -1446,8 +1445,19 @@ else:
                             'observacoes': obs_amistoso
                         }])
                         
+                        # 1. Salva no Histórico
                         salvar_dados(pd.concat([df_hist, nova_h], ignore_index=True), ABA_HISTORICO)
-                        salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
+                        
+                        # 2. Pausa para o Google Sheets não dar erro (APIError)
+                        import time
+                        time.sleep(1.5)
+                        
+                        # 3. Limpa o jogo dos ativos e protege a planilha
+                        df_limpo = df_db[df_db['torneio_id'] != tid]
+                        if df_limpo.empty:
+                            df_limpo = pd.DataFrame(columns=df_db.columns)
+                            
+                        salvar_dados(df_limpo, ABA_JOGOS)
                         
                         st.session_state.torneio_ativo = None
                         st.balloons()
@@ -1599,6 +1609,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
