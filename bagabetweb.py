@@ -87,7 +87,7 @@ def carregar_dados(aba):
     try:
         df = conn.read(worksheet=aba, ttl="0s")
         if df is None or df.empty:
-            return pd.DataFrame(columns=COLUNAS) if aba == ABA_JOGOS else pd.DataFrame(columns=['torneio_id','formato','campeao','vice','terceiro','data_fim', 'placar', 'gols_campeao', 'gols_vice'])
+            return pd.DataFrame(columns=COLUNAS) if aba == ABA_JOGOS else pd.DataFrame(columns=['torneio_id','formato','campeao','vice','terceiro','data_fim', 'placar', 'gols_campeao', 'gols_vice', 'observacoes'])
         df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
         if aba == ABA_JOGOS:
             for c in COLUNAS:
@@ -563,8 +563,14 @@ if st.session_state.torneio_ativo is None:
                 if 'placar' not in df_a.columns: df_a['placar'] = df_a['campeao']
                 else: df_a['placar'] = df_a['placar'].fillna(df_a['campeao'])
                 
-                exibir_a = df_a[['torneio_id', 'placar', 'data_fim']].sort_index(ascending=False)
-                exibir_a.columns = ['📌 Nome do Jogo', '⚽ Resultado', '📅 Data/Hora']
+                # ADICIONADO: Proteção para a coluna observacoes existir mesmo nos jogos velhos
+                if 'observacoes' not in df_a.columns: df_a['observacoes'] = ""
+                else: df_a['observacoes'] = df_a['observacoes'].fillna("")
+                
+                # Inserimos a coluna 'observacoes' na visualização
+                exibir_a = df_a[['torneio_id', 'placar', 'data_fim', 'observacoes']].sort_index(ascending=False)
+                exibir_a.columns = ['📌 Nome do Jogo', '⚽ Resultado', '📅 Data/Hora', '📝 Observações']
+                
                 st.dataframe(exibir_a, use_container_width=True, hide_index=True)
             else:
                 st.info("Nenhum amistoso registrado.")
@@ -1392,19 +1398,23 @@ else:
                     with c1: st.markdown(f"""<div style="text-align: center; background-color: #C0C0C0; padding: 15px; border-radius: 10px; color: black; margin-top: 20px; border: 2px solid #808080;"><h3>🥈 Vice</h3><h3 style="margin:0;">{v}</h3></div>""", unsafe_allow_html=True)
                     with c3: st.markdown(f"""<div style="text-align: center; background-color: #CD7F32; padding: 15px; border-radius: 10px; color: black; margin-top: 20px; border: 2px solid #8B4513;"><h3>🥉 3º Lugar</h3><h3 style="margin:0;">{t}</h3></div>""", unsafe_allow_html=True)
                 st.divider()
+                # --- BOTÃO PARA SALVAR O AMISTOSO ---
                 if fmt == "AMISTOSO":
                     st.markdown("<br>", unsafe_allow_html=True)
+                    
+                    # ADICIONADO: Campo para digitar a observação (Opcional)
+                    obs_amistoso = st.text_input("📝 Observações do Jogo (Opcional)", placeholder="Ex: Jogo pegado, gol de bicicleta, muita chuva...")
+                    
                     if st.button("🏁 SALVAR AMISTOSO E VOLTAR À HOME", use_container_width=True, type="primary"):
                         h_br = (datetime.utcnow() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
                         j = df_t.iloc[0]
                         
                         campeao_ami, vice_ami = obter_vencedor_perdedor(j)
                         
-                        # NOVA LÓGICA: Pega os gols exatos de quem ganhou e quem perdeu
                         g_camp = int(j['gols_a']) if campeao_ami == j['a'] else int(j['gols_b'])
                         g_vice = int(j['gols_b']) if campeao_ami == j['a'] else int(j['gols_a'])
                         
-                        if not campeao_ami: # Caso de Empate
+                        if not campeao_ami:
                             campeao_ami, vice_ami = "Empate", "Empate"
                             g_camp, g_vice = int(j['gols_a']), int(j['gols_b'])
                             
@@ -1416,7 +1426,8 @@ else:
                             'torneio_id': tid, 'formato': 'AMISTOSO', 
                             'campeao': campeao_ami, 'vice': vice_ami, 'terceiro': '---', 
                             'data_fim': h_br, 'placar': res_txt,
-                            'gols_campeao': g_camp, 'gols_vice': g_vice # <--- Salvando Gols AQUI!
+                            'gols_campeao': g_camp, 'gols_vice': g_vice,
+                            'observacoes': obs_amistoso # <--- Salvando a observação AQUI!
                         }])
                         
                         salvar_dados(pd.concat([df_hist, nova_h], ignore_index=True), ABA_HISTORICO)
@@ -1572,6 +1583,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
