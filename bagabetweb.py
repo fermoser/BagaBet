@@ -1281,11 +1281,8 @@ else:
                                                 encerrar = True # Jogo único/Liga sempre encerra ao salvar
                                             
                                             pa, pb = 0, 0
-                                            if fmt in ["COPA", "AMISTOSO"] and sa == sb and r['a'] != "BYE" and r['b'] != "BYE":
-                                                if is_ida_volta:
-                                                    st.caption("🏆 Pênaltis (Preencha apenas no jogo de Volta se a soma empatar)")
-                                                else:
-                                                    st.caption("🏆 Decisão por Pênaltis")
+                                            if fmt == "COPA" and status_fim == "SIM" and sa == sb and pa == pb and r['a'] != "BYE" and r['b'] != "BYE":
+                                                st.error("⚠️ Empate! Preencha o vencedor dos pênaltis antes de encerrar o confronto.")
                                                 
                                                 # Pênaltis agora alinhados perfeitamente abaixo em novas colunas
                                                 cp1, cp2 = st.columns(2)
@@ -1389,9 +1386,13 @@ else:
                 # Desenhando o Pódio
                 st.markdown(f"""<div style="text-align: center; padding: 10px;"><h2>🏆 {'VENCEDOR' if fmt == 'AMISTOSO' else 'PÓDIO FINAL'} 🏆</h2></div>""", unsafe_allow_html=True)
                 if fmt == "AMISTOSO":
-                    c1, c2 = st.columns(2)
-                    with c1: st.markdown(f"""<div style="text-align: center; background-color: #28B463; padding: 15px; border-radius: 10px; color: white; border: 2px solid #1E8449;"><h2>✅ VENCEDOR</h2><h2 style="margin:0;">{c}</h2></div>""", unsafe_allow_html=True)
-                    with c2: st.markdown(f"""<div style="text-align: center; background-color: #E74C3C; padding: 15px; border-radius: 10px; color: white; border: 2px solid #B03A2E;"><h3>❌ Derrotado</h3><h3 style="margin:0;">{v}</h3></div>""", unsafe_allow_html=True)
+                    # Nova checagem: Se 'c' (campeão) for vazio ou "Empate", mostra a caixa laranja
+                    if not c or c == "Empate":
+                        st.markdown(f"""<div style="text-align: center; background-color: #F39C12; padding: 15px; border-radius: 10px; color: white; border: 2px solid #D68910;"><h2>🤝 EMPATE</h2><h2 style="margin:0;">Tudo igual!</h2></div>""", unsafe_allow_html=True)
+                    else:
+                        c1, c2 = st.columns(2)
+                        with c1: st.markdown(f"""<div style="text-align: center; background-color: #28B463; padding: 15px; border-radius: 10px; color: white; border: 2px solid #1E8449;"><h2>✅ VENCEDOR</h2><h2 style="margin:0;">{c}</h2></div>""", unsafe_allow_html=True)
+                        with c2: st.markdown(f"""<div style="text-align: center; background-color: #E74C3C; padding: 15px; border-radius: 10px; color: white; border: 2px solid #B03A2E;"><h3>❌ Derrotado</h3><h3 style="margin:0;">{v}</h3></div>""", unsafe_allow_html=True)
                 else:
                     c1, c2, c3 = st.columns(3)
                     with c2: st.markdown(f"""<div style="text-align: center; background-color: #FFD700; padding: 15px; border-radius: 10px; color: black; border: 2px solid #B8860B;"><h2>🥇 CAMPEÃO</h2><h2 style="margin:0;">{c}</h2></div>""", unsafe_allow_html=True)
@@ -1583,6 +1584,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
