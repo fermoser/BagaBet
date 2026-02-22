@@ -1293,7 +1293,7 @@ else:
                                                 status_fim = "SIM" if encerrar else "NÃO"
                                                 
                                                 # Bloqueio de erro: não deixa encerrar se empatar e não tiver vencedor nos pênaltis
-                                                if fmt in ["COPA", "AMISTOSO"] and status_fim == "SIM" and sa == sb and pa == pb and r['a'] != "BYE" and r['b'] != "BYE":
+                                                if fmt == "COPA" and status_fim == "SIM" and sa == sb and pa == pb and r['a'] != "BYE" and r['b'] != "BYE":
                                                     st.error("⚠️ Empate! Preencha o vencedor dos pênaltis antes de encerrar o confronto.")
                                                 else:
                                                     df_db.loc[idx, ['gols_a','gols_b','ida_a','ida_b','volta_a','volta_b','pen_a','pen_b','finalizado']] = res + [pa, pb, status_fim]
@@ -1584,6 +1584,7 @@ else:
                     salvar_dados(df_db[df_db['torneio_id'] != tid], ABA_JOGOS)
                     st.session_state.torneio_ativo = None
                     st.rerun()
+
 
 
 
